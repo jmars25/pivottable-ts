@@ -321,9 +321,17 @@ callWithJQuery ($) ->
             @allTotal = @aggregator(this, [], [])
             @sorted = false
 
-            # iterate through input, accumulating data for cells
-            PivotData.forEachRecord @input, @derivedAttributes, (record) =>
-                @processRecord(record) if @filter(record)
+            # lazy: true skips initial processing entirely. The caller is
+            # responsible for pushing data via pushRecord() or pushChunk().
+            # Used by PivotStream so records can be fed in as they arrive
+            # from a fetch/websocket without ever holding the full dataset.
+            unless opts.lazy
+                if input.columnFormat and $.isEmptyObject(@derivedAttributes) and not opts.filter
+                    len = input.columns[input.columnNames[0]].length
+                    @processRecord(i, input) for i in [0...len]
+                else
+                    PivotData.forEachRecord @input, @derivedAttributes, (record) =>
+                        @processRecord(record) if @filter(record)
 
         #can handle arrays or jQuery selections of tables
         @forEachRecord = (input, derivedAttributes, f) ->
@@ -337,6 +345,37 @@ callWithJQuery ($) ->
             #if it's a function, have it call us back
             if $.isFunction(input)
                 input(addRecord)
+
+            # Columnar format: { columnNames, columns, dicts }
+            # columns holds TypedArrays for numeric data and Uint16Arrays for
+            # dictionary-encoded strings. dicts maps column name to its string
+            # lookup array. One record object is reused across all rows so no
+            # per-row allocation happens — only property values are swapped.
+            #
+            # Example input shape:
+            #   columnNames: ["region", "year", "sales"]
+            #   columns:
+            #     region: Uint16Array  (indices into dicts.region)
+            #     year:   Uint16Array  (indices into dicts.year)
+            #     sales:  Float64Array (raw numeric values)
+            #   dicts:
+            #     region: ["North", "South", "East", "West"]
+            #     year:   ["2020", "2021", "2022"]
+            else if input.columnFormat
+                len = input.columns[input.columnNames[0]].length
+                # Single object reused for every row — never more than one
+                # row-object in memory at a time regardless of dataset size
+                record = {}
+                for i in [0...len]
+                    for name in input.columnNames
+                        col = input.columns[name]
+                        dict = input.dicts?[name]
+                        # If a dict exists for this column it's dictionary-encoded:
+                        # the TypedArray holds an index, look up the real string value.
+                        # Otherwise treat the raw TypedArray value as a number directly.
+                        record[name] = if dict then dict[col[i]] else col[i]
+                    addRecord(record)
+
             else if $.isArray(input)
                 if $.isArray(input[0]) #array of arrays
                     for own i, compactRecord of input when i > 0
@@ -391,11 +430,37 @@ callWithJQuery ($) ->
             @sortKeys()
             return @rowKeys
 
-        processRecord: (record) -> #this code is called in a tight loop
+        # Overload: can be called with a plain record object (original path)
+        # or with (rowIndex, columnarInput) to read directly from TypedArrays,
+        # skipping the intermediate row-object entirely for maximum speed.
+        processRecord: (recordOrIndex, columnarInput) -> #this code is called in a tight loop
             colKey = []
             rowKey = []
-            colKey.push record[x] ? "null" for x in @colAttrs
-            rowKey.push record[x] ? "null" for x in @rowAttrs
+
+            if columnarInput?
+                # Columnar fast path: pull values straight from TypedArrays by index.
+                # No object property lookup — just array index reads.
+                i = recordOrIndex
+                for x in @colAttrs
+                    col = columnarInput.columns[x]
+                    dict = columnarInput.dicts?[x]
+                    colKey.push if col? then (if dict then dict[col[i]] else col[i]) else "null"
+                for x in @rowAttrs
+                    col = columnarInput.columns[x]
+                    dict = columnarInput.dicts?[x]
+                    rowKey.push if col? then (if dict then dict[col[i]] else col[i]) else "null"
+                # Build a minimal record object only for the aggregator's .push(record)
+                # call, which needs to read valAttrs. Only allocate what the aggregator
+                # actually needs rather than all columns.
+                record = {}
+                for x in @valAttrs
+                    col = columnarInput.columns[x]
+                    dict = columnarInput.dicts?[x]
+                    record[x] = if col? then (if dict then dict[col[i]] else col[i]) else null
+            else
+                record = recordOrIndex
+                colKey.push record[x] ? "null" for x in @colAttrs
+                rowKey.push record[x] ? "null" for x in @rowAttrs
             flatRowKey = rowKey.join(String.fromCharCode(0))
             flatColKey = colKey.join(String.fromCharCode(0))
 
@@ -420,6 +485,21 @@ callWithJQuery ($) ->
                     @tree[flatRowKey][flatColKey] = @aggregator(this, rowKey, colKey)
                 @tree[flatRowKey][flatColKey].push record
 
+        # Push a single plain record in after construction.
+        # Safe to call repeatedly as data arrives — e.g. from a parsed stream.
+        pushRecord: (record) ->
+            if @filter(record)
+                @sorted = false
+                @processRecord(record)
+
+        # Push a slice of a columnar dataset by index range.
+        # Lets you feed a large TypedArray in chunks without copying:
+        #   pd.pushChunk(columnar, 0, 5000)
+        #   pd.pushChunk(columnar, 5000, 10000)
+        pushChunk: (columnarInput, startIdx, endIdx) ->
+            @sorted = false
+            @processRecord(i, columnarInput) for i in [startIdx...endIdx]
+
         getAggregator: (rowKey, colKey) =>
             flatRowKey = rowKey.join(String.fromCharCode(0))
             flatColKey = colKey.join(String.fromCharCode(0))
@@ -433,9 +513,91 @@ callWithJQuery ($) ->
                 agg = @tree[flatRowKey][flatColKey]
             return agg ? {value: (-> null), format: -> ""}
 
+    ###
+    PivotStream — feeds a PivotData from a streaming source without ever
+    holding the full dataset in memory. Works with fetch (NDJSON), WebSocket,
+    or any source where you push records one at a time.
+
+    Usage:
+        var ps = new $.pivotUtilities.PivotStream({
+            rows: ["region"], cols: ["year"], vals: ["sales"],
+            aggregatorName: "Sum",
+            progressInterval: 2000,           # call onProgress every N records
+            onProgress: function(pd, count) { # re-render with current data
+                $("#output").pivot(pd, {});
+            },
+            onComplete: function(pd, count) { # final render
+                $("#output").pivot(pd, {});
+            }
+        });
+
+        # From a fetch (expects NDJSON — one JSON object per line):
+        ps.fromFetch("/api/data");
+
+        # Or push records manually (e.g. from a WebSocket):
+        socket.on("row",  function(row) { ps.push(row); });
+        socket.on("done", function()    { ps.done(); });
+    ###
+    class PivotStream
+        constructor: (opts = {}) ->
+            @progressInterval = opts.progressInterval ? 2000
+            @onProgress       = opts.onProgress ? ->
+            @onComplete       = opts.onComplete ? ->
+            @_count           = 0
+
+            # Build a lazy PivotData — no data processed yet
+            pdOpts = $.extend({}, opts, { lazy: true })
+            @pivotData = new PivotData({}, pdOpts)
+
+        # Push a single record. Call this from any streaming source.
+        push: (record) ->
+            @pivotData.pushRecord(record)
+            @_count++
+            if @_count % @progressInterval == 0
+                @onProgress(@pivotData, @_count)
+
+        # Signal end of stream — fires onComplete with the final PivotData.
+        done: ->
+            @onComplete(@pivotData, @_count)
+
+        # Convenience: consume a fetch response as NDJSON (one JSON object per line).
+        # Returns a Promise that resolves when the stream is fully consumed.
+        # The server should stream rows separated by newlines — no JSON array wrapper needed.
+        fromFetch: (url, fetchOpts) ->
+            self = this
+            fetch(url, fetchOpts ? {}).then((res) ->
+                if not res.ok
+                    throw new Error("PivotStream fetch failed: " + res.status + " " + res.statusText)
+                reader  = res.body.getReader()
+                decoder = new TextDecoder()
+                buffer  = ""
+
+                # Reads chunks from the stream until done, parsing each complete
+                # newline-delimited JSON object and pushing it to PivotData.
+                # The buffer holds any incomplete line carried over between chunks.
+                pump = ->
+                    reader.read().then(({ done, value }) ->
+                        if done
+                            # Flush any remaining content in the buffer
+                            if buffer.trim().length > 0
+                                try self.push(JSON.parse(buffer))
+                            self.done()
+                            return
+                        buffer += decoder.decode(value, { stream: true })
+                        lines   = buffer.split("\n")
+                        # Last element is incomplete — carry it to next chunk
+                        buffer  = lines.pop()
+                        for line in lines
+                            if line.trim().length > 0
+                                self.push(JSON.parse(line))
+                        pump()
+                    )
+                pump()
+            )
+
     #expose these to the outside world
     $.pivotUtilities = {aggregatorTemplates, aggregators, renderers, derivers, locales,
-        naturalSort, numberFormat, sortAs, PivotData}
+        naturalSort, numberFormat, sortAs, PivotData, PivotStream}
 
     ###
     Default Renderer for hierarchical table layout
