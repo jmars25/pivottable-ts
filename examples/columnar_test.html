@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Columnar Format Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.css">
+    <link rel="stylesheet" href="../dist/pivot.css">
+    <script src="../dist/pivot.js"></script>
+    <style>
+        body { font-family: Verdana; font-size: 13px; padding: 20px; }
+        h2 { margin-top: 30px; border-bottom: 1px solid #ccc; padding-bottom: 6px; }
+        .controls { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+        .controls label { font-weight: bold; }
+        .controls select, .controls button {
+            padding: 6px 12px; font-size: 13px; cursor: pointer;
+        }
+        button#run {
+            background: #2c7be5; color: white; border: none;
+            border-radius: 4px; padding: 8px 20px; font-size: 13px;
+        }
+        button#run:hover { background: #1a6abf; }
+
+        #build-warning {
+            background: #fff3cd; border: 1px solid #ffc107;
+            padding: 10px 16px; border-radius: 4px; margin-bottom: 20px;
+            font-size: 12px;
+        }
+
+        table.results {
+            border-collapse: collapse; width: 100%; max-width: 700px;
+            margin-bottom: 20px;
+        }
+        table.results th {
+            background: #f0f0f0; text-align: left;
+            padding: 8px 12px; border: 1px solid #ccc;
+        }
+        table.results td {
+            padding: 8px 12px; border: 1px solid #ccc;
+        }
+        .pass { color: #1a7a1a; font-weight: bold; }
+        .fail { color: #c00; font-weight: bold; }
+        .metric-big { font-size: 22px; font-weight: bold; color: #2c7be5; }
+        .speedup { color: #1a7a1a; font-weight: bold; font-size: 15px; }
+        .bar-wrap { background: #eee; border-radius: 3px; height: 18px; width: 300px; display: inline-block; vertical-align: middle; }
+        .bar { background: #2c7be5; height: 18px; border-radius: 3px; }
+        .bar.bar-slow { background: #e25c2c; }
+        #pivot-out { margin-top: 10px; overflow: auto; }
+        #log { font-family: monospace; font-size: 12px; background: #f8f8f8;
+               border: 1px solid #ddd; padding: 10px; max-height: 200px;
+               overflow-y: auto; white-space: pre; }
+        .section { margin-bottom: 30px; }
+        .memory-note { font-size: 11px; color: #888; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+<h1>Columnar Format &mdash; Test &amp; Benchmark</h1>
+
+<div id="build-warning">
+    <strong>Build required:</strong> Changes were made to <code>src/pivot.coffee</code>.
+    Run <code>gulp</code> (or <code>npm install &amp;&amp; gulp</code> first time) to rebuild
+    <code>dist/pivot.js</code> before using this page.
+    If the pivot table below renders, the build is up to date.
+</div>
+
+<div class="controls">
+    <label for="rowCount">Row count:</label>
+    <select id="rowCount">
+        <option value="10000">10,000</option>
+        <option value="50000">50,000</option>
+        <option value="100000" selected>100,000</option>
+        <option value="250000">250,000</option>
+        <option value="500000">500,000</option>
+    </select>
+
+    <label for="rowAttr">Rows:</label>
+    <select id="rowAttr">
+        <option value="region">region</option>
+        <option value="category">category</option>
+        <option value="year">year</option>
+    </select>
+
+    <label for="colAttr">Cols:</label>
+    <select id="colAttr">
+        <option value="year">year</option>
+        <option value="quarter">quarter</option>
+        <option value="region">region</option>
+    </select>
+
+    <button id="run">Run benchmark</button>
+</div>
+
+<div class="section">
+    <h2>Results</h2>
+    <div id="results-placeholder" style="color:#888;">Hit "Run benchmark" to start.</div>
+    <table class="results" id="results-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>Format</th>
+                <th>Build time (ms)</th>
+                <th>Est. data memory</th>
+                <th>Speed</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Row-objects (current)</td>
+                <td id="r-obj-time">&mdash;</td>
+                <td id="r-obj-mem">&mdash;</td>
+                <td><div class="bar-wrap"><div id="bar-obj" class="bar bar-slow" style="width:0%"></div></div></td>
+            </tr>
+            <tr>
+                <td>Columnar (new)</td>
+                <td id="r-col-time">&mdash;</td>
+                <td id="r-col-mem">&mdash;</td>
+                <td><div class="bar-wrap"><div id="bar-col" class="bar" style="width:0%"></div></div></td>
+            </tr>
+        </tbody>
+    </table>
+    <div id="speedup-line" style="display:none; margin: 8px 0 4px;"></div>
+    <div id="correctness-line" style="display:none; margin-bottom: 8px;"></div>
+    <div class="memory-note" id="mem-note" style="display:none;"></div>
+</div>
+
+<div class="section">
+    <h2>Live pivot (columnar input)</h2>
+    <p style="color:#555; font-size:12px;">
+        Rendered from columnar format after last benchmark run.
+        Drag fields to rearrange.
+    </p>
+    <div id="pivot-out"></div>
+</div>
+
+<div class="section">
+    <h2>Streaming test</h2>
+    <p style="color:#555; font-size:12px;">
+        Simulates rows arriving async in chunks — the pivot updates live as data comes in.
+        Rows are discarded after processing; only the aggregation tree stays in memory.<br>
+        To test real fetch streaming, run <code>node bench/stream-server.js</code> and click
+        <strong>Stream from server</strong>.
+    </p>
+    <div class="controls">
+        <label>Rows:</label>
+        <select id="s-rowCount">
+            <option value="10000">10,000</option>
+            <option value="50000">50,000</option>
+            <option value="100000" selected>100,000</option>
+            <option value="500000">500,000</option>
+        </select>
+        <label>Chunk size:</label>
+        <select id="s-chunkSize">
+            <option value="100">100</option>
+            <option value="500" selected>500</option>
+            <option value="2000">2,000</option>
+            <option value="10000">10,000</option>
+        </select>
+        <label>Delay between chunks:</label>
+        <select id="s-delay">
+            <option value="0">None (as fast as possible)</option>
+            <option value="50" selected>50ms (simulate network)</option>
+            <option value="200">200ms (slow network)</option>
+        </select>
+        <button id="s-run">Simulate stream</button>
+        <button id="s-fetch" style="background:#1a7a1a;color:white;border:none;border-radius:4px;padding:8px 16px;">
+            Stream from server
+        </button>
+    </div>
+    <div id="s-progress" style="margin:10px 0; font-family:monospace; font-size:12px; color:#555;"></div>
+    <div style="background:#eee;border-radius:3px;height:10px;width:400px;margin-bottom:12px;display:none;" id="s-bar-wrap">
+        <div id="s-bar" style="background:#2c7be5;height:10px;border-radius:3px;width:0%;transition:width 0.1s;"></div>
+    </div>
+    <div id="s-pivot-out"></div>
+</div>
+
+<div class="section">
+    <h2>Console log</h2>
+    <div id="log"></div>
+</div>
+
+<script>
+// ─── Logging ─────────────────────────────────────────────────────────────────
+function log(msg) {
+    var el = document.getElementById("log");
+    el.textContent += msg + "\n";
+    el.scrollTop = el.scrollHeight;
+}
+
+// ─── Data generation ─────────────────────────────────────────────────────────
+var DICTS = {
+    region:   ["North", "South", "East", "West"],
+    category: ["Electronics", "Furniture", "Clothing", "Food", "Sports"],
+    year:     ["2020", "2021", "2022", "2023", "2024"],
+    quarter:  ["Q1", "Q2", "Q3", "Q4"]
+};
+
+// Returns a plain array-of-objects dataset.
+function generateRowObjects(n) {
+    var rows = [];
+    for (var i = 0; i < n; i++) {
+        rows.push({
+            region:   DICTS.region[i   % DICTS.region.length],
+            category: DICTS.category[i % DICTS.category.length],
+            year:     DICTS.year[i     % DICTS.year.length],
+            quarter:  DICTS.quarter[i  % DICTS.quarter.length],
+            // Pseudo-random but deterministic so both formats produce same sums
+            sales:    Math.round((((i * 1664525 + 1013904223) & 0x7fffffff) % 90000) + 10000) / 100,
+            quantity: ((i * 22695477 + 1) & 0x7fffffff) % 100 + 1
+        });
+    }
+    return rows;
+}
+
+// Returns the same data in columnar format.
+// String columns → Uint8Array of dict indices + dict array.
+// Numeric columns → Float64Array.
+function generateColumnar(n) {
+    var regionIdx   = new Uint8Array(n);
+    var categoryIdx = new Uint8Array(n);
+    var yearIdx     = new Uint8Array(n);
+    var quarterIdx  = new Uint8Array(n);
+    var sales       = new Float64Array(n);
+    var quantity    = new Float64Array(n);
+
+    for (var i = 0; i < n; i++) {
+        regionIdx[i]   = i % DICTS.region.length;
+        categoryIdx[i] = i % DICTS.category.length;
+        yearIdx[i]     = i % DICTS.year.length;
+        quarterIdx[i]  = i % DICTS.quarter.length;
+        sales[i]       = Math.round((((i * 1664525 + 1013904223) & 0x7fffffff) % 90000) + 10000) / 100;
+        quantity[i]    = ((i * 22695477 + 1) & 0x7fffffff) % 100 + 1;
+    }
+
+    return {
+        columnFormat: true,
+        columnNames: ["region", "category", "year", "quarter", "sales", "quantity"],
+        columns: {
+            region:   regionIdx,
+            category: categoryIdx,
+            year:     yearIdx,
+            quarter:  quarterIdx,
+            sales:    sales,
+            quantity: quantity
+        },
+        dicts: {
+            region:   DICTS.region,
+            category: DICTS.category,
+            year:     DICTS.year,
+            quarter:  DICTS.quarter
+            // sales and quantity have no dict — raw numbers
+        }
+    };
+}
+
+// ─── Memory estimate (no browser API needed) ─────────────────────────────────
+// Rough theoretical calculation, not actual heap measurement.
+function estimateRowObjectBytes(n, numCols) {
+    // V8 object: ~64 bytes header + ~8 bytes per property slot
+    // String values for categoricals: ~40 bytes each (V8 string object)
+    // Number values: stored inline as doubles if < 2^31, ~8 bytes
+    var objOverhead  = 64;
+    var strCols      = 4; // region, category, year, quarter
+    var numCols2     = 2; // sales, quantity
+    var strValBytes  = 40; // average for short category strings
+    return n * (objOverhead + strCols * strValBytes + numCols2 * 8);
+}
+
+function estimateColumnarBytes(n) {
+    // 4 Uint8Arrays (1 byte/row) + 2 Float64Arrays (8 bytes/row)
+    // + dict strings (negligible, stored once)
+    return n * (4 * 1 + 2 * 8);
+}
+
+function formatBytes(b) {
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB";
+    return (b / 1024).toFixed(0) + " KB";
+}
+
+// ─── Correctness check ───────────────────────────────────────────────────────
+// Compares grand total value from two PivotData instances.
+// If the same data fed through both paths produces the same total, logic is correct.
+function checkCorrectness(pdObj, pdCol) {
+    var totalObj = pdObj.allTotal.value();
+    var totalCol = pdCol.allTotal.value();
+
+    // Also check a sample of individual cells
+    var rowKeysObj = pdObj.getRowKeys();
+    var colKeysObj = pdObj.getColKeys();
+    var mismatches = 0;
+
+    for (var r = 0; r < Math.min(rowKeysObj.length, 10); r++) {
+        for (var c = 0; c < Math.min(colKeysObj.length, 10); c++) {
+            var vObj = pdObj.getAggregator(rowKeysObj[r], colKeysObj[c]).value();
+            var vCol = pdCol.getAggregator(rowKeysObj[r], colKeysObj[c]).value();
+            if (Math.abs((vObj || 0) - (vCol || 0)) > 0.001) mismatches++;
+        }
+    }
+
+    return {
+        totalObj: totalObj,
+        totalCol: totalCol,
+        grandTotalMatch: Math.abs(totalObj - totalCol) < 0.001,
+        cellMismatches: mismatches
+    };
+}
+
+// ─── Main benchmark ──────────────────────────────────────────────────────────
+document.getElementById("run").addEventListener("click", function() {
+    var n        = parseInt(document.getElementById("rowCount").value, 10);
+    var rowAttr  = document.getElementById("rowAttr").value;
+    var colAttr  = document.getElementById("colAttr").value;
+    var logEl    = document.getElementById("log");
+    logEl.textContent = "";
+
+    document.getElementById("results-placeholder").style.display = "none";
+    document.getElementById("results-table").style.display = "none";
+    document.getElementById("speedup-line").style.display = "none";
+    document.getElementById("correctness-line").style.display = "none";
+    document.getElementById("mem-note").style.display = "none";
+    document.getElementById("pivot-out").innerHTML = "<em>Running...</em>";
+
+    log("Generating " + n.toLocaleString() + " rows...");
+
+    // Defer to next tick so the UI can update before the heavy work starts
+    setTimeout(function() {
+        var PivotData = $.pivotUtilities.PivotData;
+        var aggregators = $.pivotUtilities.aggregators;
+
+        var opts = {
+            rows: [rowAttr],
+            cols: [colAttr],
+            vals: ["sales"],
+            aggregator: aggregators["Sum"]("sales")
+        };
+
+        // ── Generate data ─────────────────────────────────────────────────
+        var t0 = performance.now();
+        var rowObjects = generateRowObjects(n);
+        log("Row-objects generated in " + (performance.now() - t0).toFixed(0) + "ms");
+
+        t0 = performance.now();
+        var columnar = generateColumnar(n);
+        log("Columnar arrays generated in " + (performance.now() - t0).toFixed(0) + "ms");
+
+        // ── Benchmark row-objects ─────────────────────────────────────────
+        log("\nBuilding PivotData from row-objects...");
+        var t1 = performance.now();
+        var pdObj = new PivotData(rowObjects, opts);
+        var timeObj = performance.now() - t1;
+        log("Row-objects: " + timeObj.toFixed(1) + "ms");
+
+        // ── Benchmark columnar ────────────────────────────────────────────
+        log("Building PivotData from columnar...");
+        var t2 = performance.now();
+        var pdCol = new PivotData(columnar, opts);
+        var timeCol = performance.now() - t2;
+        log("Columnar:    " + timeCol.toFixed(1) + "ms");
+
+        // ── Correctness ───────────────────────────────────────────────────
+        var check = checkCorrectness(pdObj, pdCol);
+        log("\nCorrectness check:");
+        log("  Grand total (row-objects): " + check.totalObj);
+        log("  Grand total (columnar):    " + check.totalCol);
+        log("  Grand total match: " + (check.grandTotalMatch ? "PASS" : "FAIL"));
+        log("  Cell mismatches (sample 10×10): " + check.cellMismatches);
+
+        // ── Memory estimates ──────────────────────────────────────────────
+        var memObj = estimateRowObjectBytes(n);
+        var memCol = estimateColumnarBytes(n);
+        var memRatio = (memObj / memCol).toFixed(1);
+        log("\nEstimated raw data memory:");
+        log("  Row-objects: " + formatBytes(memObj));
+        log("  Columnar:    " + formatBytes(memCol));
+        log("  Ratio: " + memRatio + "x smaller");
+
+        // ── Update UI ─────────────────────────────────────────────────────
+        var faster = timeObj / timeCol;
+        var maxTime = Math.max(timeObj, timeCol);
+
+        document.getElementById("r-obj-time").textContent = timeObj.toFixed(1) + " ms";
+        document.getElementById("r-col-time").textContent = timeCol.toFixed(1) + " ms";
+        document.getElementById("r-obj-mem").textContent  = formatBytes(memObj) + " (est.)";
+        document.getElementById("r-col-mem").textContent  = formatBytes(memCol) + " (est.)";
+
+        document.getElementById("bar-obj").style.width = Math.round((timeObj / maxTime) * 100) + "%";
+        document.getElementById("bar-col").style.width = Math.round((timeCol / maxTime) * 100) + "%";
+
+        var speedupEl = document.getElementById("speedup-line");
+        speedupEl.style.display = "block";
+        if (timeCol < timeObj) {
+            speedupEl.innerHTML = '<span class="speedup">Columnar is ' + faster.toFixed(2) + 'x faster</span> &nbsp;|&nbsp; ' +
+                '<span class="speedup">' + memRatio + 'x less estimated memory</span>';
+        } else {
+            speedupEl.innerHTML = 'Row-objects was faster this run (' + (timeCol / timeObj).toFixed(2) +
+                'x) &mdash; try a larger row count. &nbsp;|&nbsp; ' +
+                '<span class="speedup">' + memRatio + 'x less estimated memory for columnar</span>';
+        }
+
+        var correctEl = document.getElementById("correctness-line");
+        correctEl.style.display = "block";
+        if (check.grandTotalMatch && check.cellMismatches === 0) {
+            correctEl.innerHTML = '<span class="pass">Correctness: PASS</span> &mdash; ' +
+                'Grand total and sampled cells match between both formats.';
+        } else {
+            correctEl.innerHTML = '<span class="fail">Correctness: FAIL</span> &mdash; ' +
+                'Grand totals: ' + check.totalObj + ' vs ' + check.totalCol +
+                ', cell mismatches: ' + check.cellMismatches;
+        }
+
+        var memNote = document.getElementById("mem-note");
+        memNote.textContent = "Memory figures are theoretical estimates (V8 object overhead model). " +
+            "Actual heap usage varies. Use Chrome DevTools Memory tab for real measurements.";
+        memNote.style.display = "block";
+
+        document.getElementById("results-table").style.display = "table";
+
+        // ── Render live pivot from columnar input ─────────────────────────
+        log("\nRendering live pivot table from columnar input...");
+        $("#pivot-out").pivotUI(columnar, {
+            rows: [rowAttr],
+            cols: [colAttr],
+            vals: ["sales"],
+            aggregatorName: "Sum"
+        });
+        log("Done.");
+
+    }, 50);
+});
+
+// ─── Streaming test ───────────────────────────────────────────────────────────
+
+var DICTS2 = {
+    region:   ["North", "South", "East", "West"],
+    category: ["Electronics", "Furniture", "Clothing", "Food", "Sports"],
+    year:     ["2020", "2021", "2022", "2023", "2024"],
+    quarter:  ["Q1", "Q2", "Q3", "Q4"]
+};
+
+function makeRow(i) {
+    return {
+        region:   DICTS2.region[i   % DICTS2.region.length],
+        category: DICTS2.category[i % DICTS2.category.length],
+        year:     DICTS2.year[i     % DICTS2.year.length],
+        quarter:  DICTS2.quarter[i  % DICTS2.quarter.length],
+        sales:    Math.round((((i * 1664525 + 1013904223) & 0x7fffffff) % 90000) + 10000) / 100,
+        quantity: ((i * 22695477 + 1) & 0x7fffffff) % 100 + 1
+    };
+}
+
+function renderStreamPivot(pd) {
+    $("#s-pivot-out").empty();
+    // Render directly from the PivotData instance — no rebuild, no re-scan of raw data
+    var table = $.pivotUtilities.renderers["Table"](pd, {});
+    $("#s-pivot-out").append(table);
+}
+
+function runSimulatedStream() {
+    var n         = parseInt(document.getElementById("s-rowCount").value, 10);
+    var chunkSize = parseInt(document.getElementById("s-chunkSize").value, 10);
+    var delay     = parseInt(document.getElementById("s-delay").value, 10);
+    var progress  = document.getElementById("s-progress");
+    var barWrap   = document.getElementById("s-bar-wrap");
+    var bar       = document.getElementById("s-bar");
+    var t0        = performance.now();
+
+    document.getElementById("s-run").disabled = true;
+    document.getElementById("s-fetch").disabled = true;
+    barWrap.style.display = "block";
+    bar.style.width = "0%";
+    $("#s-pivot-out").empty();
+
+    var ps = new $.pivotUtilities.PivotStream({
+        rows: ["region"],
+        cols: ["year"],
+        vals: ["sales"],
+        aggregator: $.pivotUtilities.aggregators["Sum"]("sales"),
+        progressInterval: chunkSize,
+        onProgress: function(pd, count) {
+            var pct = Math.round((count / n) * 100);
+            bar.style.width = pct + "%";
+            progress.textContent = count.toLocaleString() + " / " + n.toLocaleString() +
+                " rows (" + pct + "%) — " + (performance.now() - t0).toFixed(0) + "ms elapsed";
+            renderStreamPivot(pd);
+        },
+        onComplete: function(pd, count) {
+            var elapsed = (performance.now() - t0).toFixed(0);
+            bar.style.width = "100%";
+            progress.textContent = "Done — " + count.toLocaleString() + " rows in " + elapsed + "ms";
+            renderStreamPivot(pd);
+            log("Stream complete: " + count.toLocaleString() + " rows in " + elapsed + "ms");
+            document.getElementById("s-run").disabled = false;
+            document.getElementById("s-fetch").disabled = false;
+        }
+    });
+
+    log("Simulating stream: " + n.toLocaleString() + " rows, chunks of " + chunkSize +
+        ", " + (delay > 0 ? delay + "ms delay" : "no delay"));
+
+    var sent = 0;
+    function sendChunk() {
+        var end = Math.min(sent + chunkSize, n);
+        for (var i = sent; i < end; i++) ps.push(makeRow(i));
+        sent = end;
+        if (sent >= n) {
+            ps.done();
+        } else if (delay > 0) {
+            setTimeout(sendChunk, delay);
+        } else {
+            // No delay — yield to browser between chunks so UI can update
+            requestAnimationFrame(sendChunk);
+        }
+    }
+    sendChunk();
+}
+
+// Real fetch stream — needs node bench/stream-server.js running on :3001
+function runFetchStream() {
+    var progress = document.getElementById("s-progress");
+    var barWrap  = document.getElementById("s-bar-wrap");
+    var bar      = document.getElementById("s-bar");
+    var t0       = performance.now();
+    var total    = null;
+
+    document.getElementById("s-run").disabled = true;
+    document.getElementById("s-fetch").disabled = true;
+    barWrap.style.display = "block";
+    bar.style.width = "0%";
+    $("#s-pivot-out").empty();
+    progress.textContent = "Connecting to stream server...";
+
+    var n = parseInt(document.getElementById("s-rowCount").value, 10);
+
+    var ps = new $.pivotUtilities.PivotStream({
+        rows: ["region"],
+        cols: ["year"],
+        vals: ["sales"],
+        aggregator: $.pivotUtilities.aggregators["Sum"]("sales"),
+        progressInterval: 2000,
+        onProgress: function(pd, count) {
+            var pct = total ? Math.round((count / total) * 100) : 0;
+            bar.style.width = pct + "%";
+            progress.textContent = count.toLocaleString() + " rows received" +
+                (total ? " (" + pct + "%)" : "") +
+                " — " + (performance.now() - t0).toFixed(0) + "ms elapsed";
+            renderStreamPivot(pd);
+        },
+        onComplete: function(pd, count) {
+            var elapsed = (performance.now() - t0).toFixed(0);
+            bar.style.width = "100%";
+            progress.textContent = "Done — " + count.toLocaleString() + " rows in " + elapsed + "ms";
+            renderStreamPivot(pd);
+            log("Fetch stream complete: " + count.toLocaleString() + " rows in " + elapsed + "ms");
+            document.getElementById("s-run").disabled = false;
+            document.getElementById("s-fetch").disabled = false;
+        }
+    });
+
+    log("Fetching stream from http://localhost:3001/stream?n=" + n + "...");
+
+    ps.fromFetch("http://localhost:3001/stream?n=" + n).catch(function(err) {
+        progress.textContent = "Error: " + err.message + " — is stream-server.js running?";
+        log("Fetch failed: " + err.message);
+        log("Start server with: node bench/stream-server.js");
+        document.getElementById("s-run").disabled = false;
+        document.getElementById("s-fetch").disabled = false;
+    });
+}
+
+document.getElementById("s-run").addEventListener("click", runSimulatedStream);
+document.getElementById("s-fetch").addEventListener("click", runFetchStream);
+</script>
+
+</body>
+</html>
