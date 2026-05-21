@@ -678,75 +678,85 @@
       }
 
       PivotData.forEachRecord = function(input, derivedAttributes, f) {
-        var addRecord, col, compactRecord, dict, i, j, k, l, len, len1, len2, n, name, o, record, ref, ref1, ref2, ref3, results, results1, results2, tblCols;
+
+        // Build addRecord — the function every input branch calls once per row.
+        // Fast path: if no derivedAttributes are configured, skip the wrapper
+        // entirely and call f directly. No closure allocation, no extra function
+        // call per record.
+        // Slow path: wrap f so derived fields are injected onto the record first.
+        // derived != null ? derived : record[attr] means: if the deriver returns
+        // null/undefined, leave the existing field value alone rather than
+        // overwriting it.
+        let addRecord;
         if (Object.keys(derivedAttributes).length === 0) {
           addRecord = f;
         } else {
           addRecord = function(record) {
-            var k, ref, v;
-            for (k in derivedAttributes) {
-              v = derivedAttributes[k];
-              record[k] = (ref = v(record)) != null ? ref : record[k];
+            for (const [attr, deriver] of Object.entries(derivedAttributes)) {
+              const derived = deriver(record);
+              record[attr] = derived != null ? derived : record[attr];
             }
-            return f(record);
+            f(record);
           };
         }
+
+        // --- Input format branches ---
+
+        // 1. Function — caller drives iteration themselves, just hand them addRecord
         if (typeof input === "function") {
-          return input(addRecord);
+          input(addRecord);
+
+        // 2. Columnar — data stored as parallel typed arrays, one per column.
+        //    Reassemble each row i as a plain object by reading across all columns
+        //    at index i. record is mutated in place each iteration — safe because
+        //    addRecord reads synchronously before the next iteration overwrites it.
         } else if (input.columnFormat) {
-          len = input.columns[input.columnNames[0]].length;
-          record = {};
-          results = [];
-          for (i = l = 0, ref = len; 0 <= ref ? l < ref : l > ref; i = 0 <= ref ? ++l : --l) {
-            ref1 = input.columnNames;
-            for (n = 0, len1 = ref1.length; n < len1; n++) {
-              name = ref1[n];
-              col = input.columns[name];
-              dict = (ref2 = input.dicts) != null ? ref2[name] : void 0;
+          const len    = input.columns[input.columnNames[0]].length;
+          const record = {};
+          for (let i = 0; i < len; i++) {
+            for (const name of input.columnNames) {
+              const col  = input.columns[name];
+              const dict = input.dicts != null ? input.dicts[name] : void 0;
+              // If column is dictionary-encoded, col[i] is an integer index into
+              // the dict array. Otherwise use the raw value directly.
               record[name] = dict ? dict[col[i]] : col[i];
             }
-            results.push(addRecord(record));
+            addRecord(record);
           }
-          return results;
+
+        // 3. Array of arrays — first row is headers, remaining rows are data.
+        //    Zip each data row against the header row to produce a record object.
+        } else if (Array.isArray(input) && Array.isArray(input[0])) {
+          const headers = input[0];
+          for (let i = 1; i < input.length; i++) {
+            const row    = input[i];
+            const record = {};
+            for (let j = 0; j < headers.length; j++) {
+              record[headers[j]] = row[j];
+            }
+            addRecord(record);
+          }
+
+        // 4. Array of objects — the simplest case, pass each object straight through
         } else if (Array.isArray(input)) {
-          if (Array.isArray(input[0])) {
-            results1 = [];
-            for (i in input) {
-              if (!hasProp.call(input, i)) continue;
-              compactRecord = input[i];
-              if (!(i > 0)) {
-                continue;
-              }
-              record = {};
-              ref3 = input[0];
-              for (j in ref3) {
-                if (!hasProp.call(ref3, j)) continue;
-                k = ref3[j];
-                record[k] = compactRecord[j];
-              }
-              results1.push(addRecord(record));
-            }
-            return results1;
-          } else {
-            results2 = [];
-            for (o = 0, len2 = input.length; o < len2; o++) {
-              record = input[o];
-              results2.push(addRecord(record));
-            }
-            return results2;
+          for (const record of input) {
+            addRecord(record);
           }
+
+        // 5. HTML table — read headers from <thead> th elements, then build a
+        //    record per <tbody> tr using the matching th as the field name
         } else if (input instanceof HTMLElement) {
-          tblCols = [];
-          input.querySelectorAll("thead > tr > th").forEach(function(th) {
-            return tblCols.push(th.textContent);
-          });
-          return input.querySelectorAll("tbody > tr").forEach(function(tr) {
-            record = {};
+          const headers = Array.prototype.slice.call(input.querySelectorAll("thead > tr > th"))
+            .map(function(th) { return th.textContent; });
+
+          input.querySelectorAll("tbody > tr").forEach(function(tr) {
+            const record = {};
             tr.querySelectorAll("td").forEach(function(td, j) {
-              return record[tblCols[j]] = td.textContent;
+              record[headers[j]] = td.textContent;
             });
-            return addRecord(record);
+            addRecord(record);
           });
+
         } else {
           throw new Error("unknown input format");
         }
@@ -852,49 +862,74 @@
       };
 
       PivotData.prototype.processRecord = function(recordOrIndex, columnarInput) {
-        var col, colKey, dict, flatColKey, flatRowKey, i, l, len1, len2, len3, len4, len5, n, o, record, ref, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9, rowKey, t, u, x;
-        colKey = [];
-        rowKey = [];
+        const NULL_STR = String.fromCharCode(0);
+
+        // Helper: read a single value out of a columnar column at row index i.
+        // If the column is dictionary-encoded, decode the integer back to a string.
+        // Returns the string "null" if the column doesn't exist in the input.
+        function readColumnarValue(columnarInput, attr, i) {
+          const col  = columnarInput.columns[attr];
+          if (col == null) return "null";
+          const dict = columnarInput.dicts?.[attr];
+          return dict ? dict[col[i]] : col[i];
+        }
+
+        const colKey = [];
+        const rowKey = [];
+        let record;
+
         if (columnarInput != null) {
-          i = recordOrIndex;
-          ref = this.colAttrs;
-          for (l = 0, len1 = ref.length; l < len1; l++) {
-            x = ref[l];
-            col = columnarInput.columns[x];
-            dict = (ref1 = columnarInput.dicts) != null ? ref1[x] : void 0;
-            colKey.push(col != null ? (dict ? dict[col[i]] : col[i]) : "null");
+          // --- Columnar path ---
+          // recordOrIndex is a row index integer, not a record object.
+          // Read axis keys directly from the typed arrays — no record object needed
+          // for row/col attrs.  Only build a minimal record for valAttrs so the
+          // aggregator's push(record) has something to read from.
+          const i = recordOrIndex;
+
+          for (const attr of this.colAttrs) {
+            colKey.push(readColumnarValue(columnarInput, attr, i));
           }
-          ref2 = this.rowAttrs;
-          for (n = 0, len2 = ref2.length; n < len2; n++) {
-            x = ref2[n];
-            col = columnarInput.columns[x];
-            dict = (ref3 = columnarInput.dicts) != null ? ref3[x] : void 0;
-            rowKey.push(col != null ? (dict ? dict[col[i]] : col[i]) : "null");
+
+          for (const attr of this.rowAttrs) {
+            rowKey.push(readColumnarValue(columnarInput, attr, i));
           }
+
+          // Only extract the value attributes the aggregator actually needs
           record = {};
-          ref4 = this.valAttrs;
-          for (o = 0, len3 = ref4.length; o < len3; o++) {
-            x = ref4[o];
-            col = columnarInput.columns[x];
-            dict = (ref5 = columnarInput.dicts) != null ? ref5[x] : void 0;
-            record[x] = col != null ? (dict ? dict[col[i]] : col[i]) : null;
+          for (const attr of this.valAttrs) {
+            const col  = columnarInput.columns[attr];
+            const dict = columnarInput.dicts?.[attr];
+            record[attr] = col == null ? null : (dict ? dict[col[i]] : col[i]);
           }
+
         } else {
+          // --- Row-oriented path ---
+          // recordOrIndex is a plain object — read axis keys directly off it.
+          // Missing values become the string "null" so they appear as a labelled
+          // row/col in the output rather than being silently dropped.
           record = recordOrIndex;
-          ref6 = this.colAttrs;
-          for (t = 0, len4 = ref6.length; t < len4; t++) {
-            x = ref6[t];
-            colKey.push((ref7 = record[x]) != null ? ref7 : "null");
+
+          for (const attr of this.colAttrs) {
+            colKey.push(record[attr] != null ? record[attr] : "null");
           }
-          ref8 = this.rowAttrs;
-          for (u = 0, len5 = ref8.length; u < len5; u++) {
-            x = ref8[u];
-            rowKey.push((ref9 = record[x]) != null ? ref9 : "null");
+
+          for (const attr of this.rowAttrs) {
+            rowKey.push(record[attr] != null ? record[attr] : "null");
           }
         }
-        flatRowKey = rowKey.join(String.fromCharCode(0));
-        flatColKey = colKey.join(String.fromCharCode(0));
+
+        // Join multi-attribute keys into a single string using the null character
+        // as a separator — safe because null chars never appear in real values.
+        // e.g. ["East", "2024"] → "East\x002024"
+        const flatRowKey = rowKey.join(NULL_STR);
+        const flatColKey = colKey.join(NULL_STR);
+
+        // --- Push into the four aggregator buckets ---
+
+        // 1. Grand total — every record, no conditions
         this.allTotal.push(record);
+
+        // 2. Row total — keyed by row attrs only
         if (rowKey.length !== 0) {
           if (!this.rowTotals[flatRowKey]) {
             this.rowKeys.push(rowKey);
@@ -902,6 +937,8 @@
           }
           this.rowTotals[flatRowKey].push(record);
         }
+
+        // 3. Col total — keyed by col attrs only
         if (colKey.length !== 0) {
           if (!this.colTotals[flatColKey]) {
             this.colKeys.push(colKey);
@@ -909,14 +946,17 @@
           }
           this.colTotals[flatColKey].push(record);
         }
-        if (colKey.length !== 0 && rowKey.length !== 0) {
+
+        // 4. Cell — keyed by both row and col attrs
+        // Only exists when both axes are configured
+        if (rowKey.length !== 0 && colKey.length !== 0) {
           if (!this.tree[flatRowKey]) {
             this.tree[flatRowKey] = {};
           }
           if (!this.tree[flatRowKey][flatColKey]) {
             this.tree[flatRowKey][flatColKey] = this.aggregator(this, rowKey, colKey);
           }
-          return this.tree[flatRowKey][flatColKey].push(record);
+          this.tree[flatRowKey][flatColKey].push(record);
         }
       };
 
