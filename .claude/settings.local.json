@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\jmars\\\\Documents\\\\PivotTable\\\\pivottable\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(npm install *)",
+      "Bash(npx gulp *)",
+      "Bash(npx coffeescript *)",
+      "Bash(npx coffeescript@2 --version)",
+      "Bash(npx coffeescript@2 -c -o dist src/pivot.coffee)",
+      "Bash(coffee --version)",
+      "Bash(coffee -c -o \"C:\\\\Users\\\\jmars\\\\Documents\\\\PivotTable\\\\pivottable\\\\dist\" \"C:\\\\Users\\\\jmars\\\\Documents\\\\PivotTable\\\\pivottable\\\\src\\\\pivot.coffee\")",
+      "Bash(Get-Item \"C:\\\\Users\\\\jmars\\\\Documents\\\\PivotTable\\\\pivottable\\\\dist\\\\pivot.js\")",
+      "Bash(Select-Object LastWriteTime, Length)",
+      "Bash(npx http-server *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/examples/columnar_test.html)",
+      "Bash(node --expose-gc bench/memory.js 100000)",
+      "Bash(node --expose-gc bench/memory.js 500000)",
+      "Bash(coffee -c -o dist src/pivot.coffee)",
+      "Bash(git config *)",
+      "Bash(git commit *)",
+      "Bash(cp dist/pivot.js src/pivot.js)",
+      "Bash(git rm *)",
+      "Bash(npm --version)",
+      "Bash(npx tsc *)",
+      "Bash(npx tsup *)",
+      "Bash(git add *)",
+      "Bash(git restore *)",
+      "Bash(git push *)",
+      "Bash(node -e \"const p = require\\('./dist/pivot.js'\\); console.log\\('CJS loads OK'\\);\")",
+      "Bash(npx --yes http-server --version)",
+      "Bash(npm run *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

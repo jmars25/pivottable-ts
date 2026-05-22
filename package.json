@@ -10,6 +10,10 @@
       "types": "./dist/pivot.d.ts",
       "import": "./dist/pivot.mjs",
       "require": "./dist/pivot.js"
+    },
+    "./jquery": {
+      "import": "./dist/adapters/jquery.mjs",
+      "require": "./dist/adapters/jquery.js"
     }
   },
   "files": [

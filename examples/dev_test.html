@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PivotTable — TypeScript Build Dev Test</title>
+
+  <!-- jQuery + jQuery UI (needed for pivotUI drag-and-drop) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js"></script>
+  <link  rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.2/themes/base/jquery-ui.min.css">
+  <!-- Pivot table CSS from original CDN (our dist/ no longer includes CSS) -->
+  <link  rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css">
+  <!-- jQuery adapter bundle (includes core + $.fn.pivot / $.fn.pivotUI) -->
+  <!-- ?v= busts the browser cache whenever you bump the number after a rebuild -->
+  <script src="../dist/adapters/jquery.js?v=2"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; font-size: 14px; margin: 0; background: #f5f5f5; color: #222; }
+
+    h1  { margin: 0; font-size: 1.3rem; }
+    h2  { font-size: 1rem; margin: 0 0 8px; }
+    p   { margin: 4px 0; }
+
+    header { background: #1a1a2e; color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 16px; }
+    header span { opacity: .6; font-size: .85rem; }
+
+    #suite { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .card-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      background: #f8f8f8;
+      border-bottom: 1px solid #ddd;
+      cursor: pointer;
+      user-select: none;
+    }
+    .card-header:hover { background: #efefef; }
+    .card-title { font-weight: 600; flex: 1; }
+    .card-body  { padding: 14px; display: none; }
+    .card.open .card-body { display: block; }
+
+    /* status badges */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
+    .badge-pass    { background: #d4edda; color: #155724; }
+    .badge-fail    { background: #f8d7da; color: #721c24; }
+    .badge-pending { background: #fff3cd; color: #856404; }
+    .badge-info    { background: #d1ecf1; color: #0c5460; }
+
+    .timer { font-size: .8rem; color: #888; }
+
+    /* assertion list */
+    .assert-list { list-style: none; padding: 0; margin: 0 0 10px; }
+    .assert-list li { padding: 3px 0 3px 22px; position: relative; font-size: .85rem; }
+    .assert-list li::before { position: absolute; left: 0; top: 3px; }
+    .assert-list .pass::before { content: "✓"; color: #28a745; }
+    .assert-list .fail::before { content: "✗"; color: #dc3545; font-weight: 700; }
+    .assert-list .info::before { content: "ℹ"; color: #17a2b8; }
+
+    /* pivot table display */
+    .pvtTable { border-collapse: collapse; margin-top: 10px; font-size: .85rem; }
+    .pvtTable th, .pvtTable td { border: 1px solid #ccc; padding: 4px 8px; text-align: right; white-space: nowrap; }
+    .pvtTable th { background: #f0f0f0; text-align: center; font-weight: 600; }
+    .pvtTable .pvtAxisLabel, .pvtTable .pvtTotalLabel { background: #e8e8e8; font-style: italic; }
+    .pvtTable .pvtRowLabel { text-align: left; background: #fafafa; }
+    .pvtTable .pvtTotal  { background: #f5f5f5; font-weight: 600; }
+    .pvtTable .pvtGrandTotal { background: #ececec; font-weight: 700; }
+
+    .code { font-family: monospace; font-size: .82rem; background: #f4f4f4; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px 10px; overflow-x: auto; white-space: pre; }
+
+    #global-status { padding: 10px 20px; font-size: .9rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>PivotTable — TypeScript Build</h1>
+  <span id="build-stamp">dist/pivot.js</span>
+  <span id="run-status" style="margin-left:auto;"></span>
+</header>
+
+<div id="global-status"></div>
+
+<!-- ── Interactive pivot UI ──────────────────────────────────────────────── -->
+<div style="padding: 16px 20px 0;">
+  <div class="card open">
+    <div class="card-header" style="cursor:default">
+      <span class="card-title">Interactive PivotUI — drag fields, change aggregator, try renderers</span>
+      <span class="badge badge-info">live</span>
+    </div>
+    <div class="card-body" style="display:block; overflow-x:auto">
+      <div id="pivot-ui-output"></div>
+    </div>
+  </div>
+</div>
+
+<div id="suite"></div>
+
+<script>
+(function() {
+// ─────────────────────────────────────────────────────────────────────────────
+// Mini test harness
+// ─────────────────────────────────────────────────────────────────────────────
+const suite = [];
+let passCount = 0, failCount = 0;
+
+function test(title, fn) {
+  suite.push({ title, fn });
+}
+
+function assert(condition, msg) {
+  return { ok: !!condition, msg };
+}
+
+function assertEqual(a, b, msg) {
+  const ok = a === b;
+  return { ok, msg: msg + (ok ? "" : `  (expected ${JSON.stringify(b)}, got ${JSON.stringify(a)})`) };
+}
+
+function assertClose(a, b, tol, msg) {
+  const ok = Math.abs(a - b) <= (tol ?? 0.001);
+  return { ok, msg: msg + (ok ? "" : `  (expected ~${b}, got ${a})`) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shorthand for pivotUtilities
+// ─────────────────────────────────────────────────────────────────────────────
+const pu = $.pivotUtilities;
+const { PivotData, PivotStream, aggregatorTemplates, numberFormat } = pu;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared sample data
+// ─────────────────────────────────────────────────────────────────────────────
+const ROWS = [
+  { region: "East",  product: "Widget", year: "2023", sales: 100 },
+  { region: "East",  product: "Gadget", year: "2023", sales: 200 },
+  { region: "West",  product: "Widget", year: "2023", sales: 150 },
+  { region: "West",  product: "Gadget", year: "2023", sales: 300 },
+  { region: "East",  product: "Widget", year: "2024", sales: 120 },
+  { region: "East",  product: "Gadget", year: "2024", sales: 220 },
+  { region: "West",  product: "Widget", year: "2024", sales: 170 },
+  { region: "West",  product: "Gadget", year: "2024", sales: 350 },
+];
+
+const ROWS_GRAND_TOTAL = ROWS.reduce((s, r) => s + r.sales, 0); // 1610
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 1 — PivotData available on $.pivotUtilities
+// ─────────────────────────────────────────────────────────────────────────────
+test("Build: $.pivotUtilities exports", function() {
+  return [
+    assert(typeof PivotData    === "function", "PivotData is a function"),
+    assert(typeof PivotStream  === "function", "PivotStream is a function"),
+    assert(typeof aggregatorTemplates === "object", "aggregatorTemplates is an object"),
+    assert(typeof numberFormat === "function", "numberFormat is a function"),
+    assert(typeof pu.naturalSort === "function", "naturalSort exported"),
+    assert(typeof pu.sortAs     === "function", "sortAs exported"),
+    assert(typeof pu.derivers   === "object",   "derivers exported"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 2 — Array-of-objects input + Sum aggregator
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: array-of-objects input, Sum aggregator", function() {
+  const pd = new PivotData(ROWS, {
+    rows: ["region"],
+    cols: ["year"],
+    vals: ["sales"],
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+
+  const grandTotal = pd.getAggregator([], []).value();
+  const eastTotal  = pd.getAggregator(["East"], []).value();
+  const westTotal  = pd.getAggregator(["West"], []).value();
+  const east2023   = pd.getAggregator(["East"], ["2023"]).value();
+
+  return [
+    assertEqual(grandTotal, 1610, "Grand total"),
+    assertEqual(eastTotal,  640,  "East row total"),
+    assertEqual(westTotal,  970,  "West row total"),
+    assertEqual(east2023,   300,  "East / 2023 cell"),
+    assertEqual(pd.getRowKeys().length, 2, "2 row keys"),
+    assertEqual(pd.getColKeys().length, 2, "2 col keys"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 3 — Array-of-arrays input
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: array-of-arrays input", function() {
+  const aoa = [
+    ["region", "product", "sales"],
+    ["East",   "Widget",  100],
+    ["East",   "Gadget",  200],
+    ["West",   "Widget",  150],
+    ["West",   "Gadget",  300],
+  ];
+  const pd = new PivotData(aoa, {
+    rows: ["region"],
+    vals: ["sales"],
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+  const grandTotal = pd.getAggregator([], []).value();
+  const east = pd.getAggregator(["East"], []).value();
+
+  return [
+    assertEqual(grandTotal, 750, "Grand total from AoA"),
+    assertEqual(east,       300, "East total from AoA"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 4 — Columnar input (manually constructed)
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: columnar input (TypedArray)", function() {
+  // region dict: 0=East, 1=West
+  const regionDict = ["East", "West"];
+  const regionCol  = new Uint8Array([0, 0, 1, 1, 0, 0, 1, 1]);
+
+  // product dict: 0=Widget, 1=Gadget
+  const productDict = ["Widget", "Gadget"];
+  const productCol  = new Uint8Array([0, 1, 0, 1, 0, 1, 0, 1]);
+
+  // year dict: 0=2023, 1=2024
+  const yearDict = ["2023", "2024"];
+  const yearCol  = new Uint8Array([0, 0, 0, 0, 1, 1, 1, 1]);
+
+  const salesCol = new Float64Array([100, 200, 150, 300, 120, 220, 170, 350]);
+
+  const columnar = {
+    columnFormat: true,
+    columnNames: ["region", "product", "year", "sales"],
+    columns: { region: regionCol, product: productCol, year: yearCol, sales: salesCol },
+    dicts:   { region: regionDict, product: productDict, year: yearDict },
+  };
+
+  const pd = new PivotData(columnar, {
+    rows: ["region"],
+    cols: ["year"],
+    vals: ["sales"],
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+
+  const grandTotal = pd.getAggregator([], []).value();
+  const east2024   = pd.getAggregator(["East"], ["2024"]).value();
+
+  return [
+    assertEqual(grandTotal, 1610, "Grand total from columnar"),
+    assertEqual(east2024,   340,  "East/2024 cell from columnar"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 5 — Count aggregator
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: Count aggregator", function() {
+  const pd = new PivotData(ROWS, {
+    rows: ["region"],
+    aggregator: aggregatorTemplates.count()(),
+  });
+  return [
+    assertEqual(pd.getAggregator([], []).value(), 8, "Total count = 8"),
+    assertEqual(pd.getAggregator(["East"], []).value(), 4, "East count = 4"),
+    assertEqual(pd.getAggregator(["West"], []).value(), 4, "West count = 4"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 6 — derivedAttributes
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: derivedAttributes", function() {
+  const pd = new PivotData(ROWS, {
+    rows: ["salesBand"],
+    derivedAttributes: {
+      salesBand: function(r) { return r.sales >= 200 ? "High" : "Low"; }
+    },
+    aggregator: aggregatorTemplates.count()(),
+  });
+  const high = pd.getAggregator(["High"], []).value();
+  const low  = pd.getAggregator(["Low"],  []).value();
+  // sales >= 200: 200, 300, 220, 350 → 4 High; 100, 150, 120, 170 → 4 Low
+  return [
+    assertEqual(high, 4, "High band count = 4"),
+    assertEqual(low,  4, "Low band count = 4"),
+    assertEqual(high + low, 8, "Total = 8"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 7 — filter option
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: filter option", function() {
+  const pd = new PivotData(ROWS, {
+    rows: ["region"],
+    filter: function(r) { return r.year === "2023"; },
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+  const grandTotal = pd.getAggregator([], []).value();
+  return [
+    assertEqual(grandTotal, 750, "2023-only grand total = 750"),
+    assertEqual(pd.getRowKeys().length, 2, "Still 2 row keys"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 8 — PivotStream push/done → toColumnar → PivotData
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotStream: push/done → toColumnar → PivotData", function() {
+  return new Promise(function(resolve) {
+    const results = [];
+    const ps = new PivotStream({
+      onComplete: function(err, count, stream) {
+        results.push(assertEqual(err,   null, "onComplete error is null"));
+        results.push(assertEqual(count, 8,    "onComplete count = 8"));
+
+        const columnar = stream.toColumnar();
+        results.push(assert(columnar.columnFormat === true, "toColumnar has columnFormat flag"));
+        results.push(assert(columnar.columnNames.includes("region"), "columnNames includes region"));
+        results.push(assert(columnar.columns.region instanceof Uint16Array, "region is Uint16Array"));
+        results.push(assert(columnar.columns.sales instanceof Float64Array, "sales is Float64Array"));
+
+        const pd = new PivotData(columnar, {
+          rows: ["region"],
+          cols: ["year"],
+          vals: ["sales"],
+          aggregator: aggregatorTemplates.sum()(["sales"]),
+        });
+        const grandTotal = pd.getAggregator([], []).value();
+        results.push(assertEqual(grandTotal, 1610, "PivotStream → PivotData grand total = 1610"));
+
+        resolve(results);
+      }
+    });
+
+    ROWS.forEach(function(r) { ps.push(r); });
+    ps.done();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 9 — numberFormat
+// ─────────────────────────────────────────────────────────────────────────────
+test("numberFormat utility", function() {
+  const fmt    = numberFormat({ digitsAfterDecimal: 2, prefix: "$" });
+  const pctFmt = numberFormat({ digitsAfterDecimal: 1, scaler: 100, suffix: "%" });
+  return [
+    assertEqual(fmt(1234.5),   "$1,234.50", "dollar format"),
+    assertEqual(fmt(0),        "$0.00",     "zero"),
+    assertEqual(pctFmt(0.456), "45.6%",     "percent format"),
+    assertEqual(fmt(NaN),      "",          "NaN returns empty string"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 10 — pivotTableRenderer produces a valid DOM table
+// ─────────────────────────────────────────────────────────────────────────────
+test("pivotTableRenderer: DOM output", function() {
+  const pd = new PivotData(ROWS, {
+    rows: ["region"],
+    cols: ["year"],
+    vals: ["sales"],
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+
+  // pivotTableRenderer is the default renderer — call it via $.fn.pivot
+  // which wires up the renderer internally
+  const container = document.createElement("div");
+  $(container).pivot(ROWS, {
+    rows: ["region"],
+    cols: ["year"],
+    vals: ["sales"],
+    aggregatorName: "Sum",
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+
+  const table = container.querySelector("table.pvtTable");
+  if (!table) return [assert(false, "table.pvtTable not found in output")];
+
+  const numRows = parseInt(table.getAttribute("data-numrows"), 10);
+  const numCols = parseInt(table.getAttribute("data-numcols"), 10);
+
+  // Grand total cell should display "1,610"
+  const grandTotalTd = container.querySelector(".pvtGrandTotal");
+  const grandTotalVal = grandTotalTd ? grandTotalTd.getAttribute("data-value") : null;
+
+  return [
+    assert(table !== null,  "table.pvtTable rendered"),
+    assertEqual(numRows, 2, "data-numrows = 2"),
+    assertEqual(numCols, 2, "data-numcols = 2"),
+    assertEqual(grandTotalVal, "1610", "grand total data-value = 1610"),
+    assert(container.querySelectorAll(".pvtVal").length === 4, "4 data cells (2×2)"),
+    assert(container.querySelectorAll(".pvtRowLabel").length > 0, "row labels present"),
+    assert(container.querySelectorAll(".pvtColLabel").length > 0, "col labels present"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 11 — naturalSort
+// ─────────────────────────────────────────────────────────────────────────────
+test("naturalSort ordering", function() {
+  const ns = pu.naturalSort;
+  const sorted = ["10", "2", "20", "1", "3"].sort(ns);
+  return [
+    assert(ns(1, 2)      < 0,  "1 < 2 numerically"),
+    assert(ns(2, 1)      > 0,  "2 > 1 numerically"),
+    assert(ns("a", "b")  < 0,  "'a' < 'b'"),
+    assert(ns(null, "a") < 0,  "null sorts before value"),
+    assertEqual(sorted.join(","), "1,2,3,10,20", "numeric strings sort numerically"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 12 — Performance: 50k rows, Sum aggregator
+// ─────────────────────────────────────────────────────────────────────────────
+test("Performance: 50k rows, Sum aggregator", function() {
+  const N = 50_000;
+  const regions  = ["North", "South", "East", "West", "Central"];
+  const products = ["Alpha", "Beta", "Gamma", "Delta"];
+  const years    = ["2021", "2022", "2023", "2024"];
+
+  const data = [];
+  for (let i = 0; i < N; i++) {
+    data.push({
+      region:  regions[i  % regions.length],
+      product: products[i % products.length],
+      year:    years[i    % years.length],
+      sales:   Math.round(Math.random() * 1000),
+    });
+  }
+
+  const t0 = performance.now();
+  const pd = new PivotData(data, {
+    rows: ["region", "product"],
+    cols: ["year"],
+    vals: ["sales"],
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+  const t1 = performance.now();
+
+  const grandTotal = pd.getAggregator([], []).value();
+  const elapsed    = (t1 - t0).toFixed(1);
+
+  return [
+    assert(grandTotal > 0,                         `Grand total > 0 (was ${grandTotal})`),
+    assert(pd.getRowKeys().length === regions.length * products.length,
+           `Row keys = ${regions.length * products.length}`),
+    assert((t1 - t0) < 2000,                       `Completed in ${elapsed}ms (< 2s)`),
+    { ok: true, msg: `ℹ  Ingest + aggregate: ${elapsed} ms for ${N.toLocaleString()} rows` },
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 13 — Lazy mode + pushRecord
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: lazy mode + pushRecord", function() {
+  const pd = new PivotData([], {
+    rows: ["region"],
+    vals: ["sales"],
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+    lazy: true,
+  });
+
+  // Nothing processed yet
+  const emptyTotal = pd.getAggregator([], []).value();
+
+  ROWS.forEach(function(r) { pd.pushRecord(r); });
+
+  const grandTotal = pd.getAggregator([], []).value();
+  return [
+    // Sum aggregator initialises to 0 (sum of nothing), not null.
+    // Only extremes (min/max/first/last) starts null. Count starts at 0 too.
+    assertEqual(emptyTotal, 0, "Sum = 0 before any records pushed"),
+    assertEqual(grandTotal, 1610, "Grand total after pushRecord loop"),
+    assertEqual(pd.getRowKeys().length, 2, "2 row keys after push"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Render a live pivot table at the bottom of the page for visual inspection
+// ─────────────────────────────────────────────────────────────────────────────
+function renderLiveTable() {
+  const card = makeCard("Live Render: Sum of Sales by Region × Year (visual check)");
+  card.classList.add("open");
+  const body = card.querySelector(".card-body");
+
+  const container = document.createElement("div");
+  $(container).pivot(ROWS, {
+    rows: ["region"],
+    cols: ["year"],
+    vals: ["sales"],
+    aggregatorName: "Sum",
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+  body.appendChild(container);
+
+  const note = document.createElement("p");
+  note.style.color = "#888";
+  note.style.fontSize = ".8rem";
+  note.style.marginTop = "8px";
+  note.textContent = "Expected: East/2023=300, East/2024=340, West/2023=450, West/2024=520, Grand Total=1610";
+  body.appendChild(note);
+
+  document.getElementById("suite").appendChild(card);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Harness runner
+// ─────────────────────────────────────────────────────────────────────────────
+function makeCard(title) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="card-header">
+      <span class="card-title">${title}</span>
+      <span class="badge badge-pending">pending</span>
+      <span class="timer"></span>
+    </div>
+    <div class="card-body"></div>
+  `;
+  card.querySelector(".card-header").addEventListener("click", function() {
+    card.classList.toggle("open");
+  });
+  return card;
+}
+
+async function runAll() {
+  const suiteEl = document.getElementById("suite");
+
+  for (const t of suite) {
+    const card   = makeCard(t.title);
+    const badge  = card.querySelector(".badge");
+    const timer  = card.querySelector(".timer");
+    const body   = card.querySelector(".card-body");
+    suiteEl.appendChild(card);
+
+    const t0 = performance.now();
+    let assertions = [];
+    try {
+      const result = t.fn();
+      assertions = result instanceof Promise ? await result : result;
+    } catch (e) {
+      assertions = [{ ok: false, msg: "Threw: " + e.message }];
+    }
+    const elapsed = (performance.now() - t0).toFixed(1);
+
+    const ul = document.createElement("ul");
+    ul.className = "assert-list";
+    let allPass = true;
+    for (const a of assertions) {
+      const li = document.createElement("li");
+      li.className = a.ok ? "pass" : (a.msg.startsWith("ℹ") ? "info" : "fail");
+      li.textContent = a.msg;
+      ul.appendChild(li);
+      if (!a.ok && !a.msg.startsWith("ℹ")) allPass = false;
+    }
+    body.appendChild(ul);
+
+    timer.textContent = elapsed + " ms";
+    if (allPass) {
+      badge.className = "badge badge-pass";
+      badge.textContent = "pass";
+      passCount++;
+      // auto-collapse passing tests
+    } else {
+      badge.className = "badge badge-fail";
+      badge.textContent = "fail";
+      failCount++;
+      card.classList.add("open");
+    }
+  }
+
+  const statusEl = document.getElementById("run-status");
+  const globalEl = document.getElementById("global-status");
+  const total = passCount + failCount;
+  if (failCount === 0) {
+    statusEl.innerHTML = `<span class="badge badge-pass">${passCount}/${total} passed</span>`;
+    globalEl.innerHTML = `<span class="badge badge-pass" style="font-size:.9rem">All ${total} test suites passed</span>`;
+  } else {
+    statusEl.innerHTML = `<span class="badge badge-fail">${failCount} failed / ${total}</span>`;
+    globalEl.innerHTML = `<span class="badge badge-fail" style="font-size:.9rem">${failCount} suite(s) failed</span>`;
+  }
+
+  renderLiveTable();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interactive PivotUI
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Larger sample dataset so the UI is actually interesting to explore
+function makeDemoData(n) {
+  const regions   = ["North", "South", "East", "West"];
+  const products  = ["Widget", "Gadget", "Doohickey", "Thingamajig"];
+  const channels  = ["Online", "Retail", "Wholesale"];
+  const years     = ["2022", "2023", "2024"];
+  const quarters  = ["Q1", "Q2", "Q3", "Q4"];
+  const data = [];
+  for (let i = 0; i < n; i++) {
+    const qty   = Math.floor(Math.random() * 100) + 1;
+    const price = [9.99, 24.99, 49.99, 99.99][i % 4];
+    data.push({
+      Region:   regions[i   % regions.length],
+      Product:  products[i  % products.length],
+      Channel:  channels[i  % channels.length],
+      Year:     years[i     % years.length],
+      Quarter:  quarters[i  % quarters.length],
+      Quantity: qty,
+      Revenue:  Math.round(qty * price * 100) / 100,
+    });
+  }
+  return data;
+}
+
+function initPivotUI() {
+  const data = makeDemoData(500);
+  $("#pivot-ui-output").pivotUI(data, {
+    rows:          ["Region"],
+    cols:          ["Year"],
+    aggregatorName:"Sum",
+    vals:          ["Revenue"],
+    rendererName:  "Table",
+  });
+}
+
+window.addEventListener("DOMContentLoaded", function() {
+  initPivotUI();
+  runAll();
+});
+
+})(); // end IIFE — keeps const declarations out of global scope
+</script>
+</body>
+</html>

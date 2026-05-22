@@ -1,2067 +1,1063 @@
-// $ is used by the jQuery UI adapter layer ($.fn.pivot, $.fn.pivotUI etc.)
-// Will be replaced with a proper import when the UI layer is extracted.
-declare var $: any;
-
-(function() {
-  var indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; },
-    slice = [].slice,
-    bind = function(fn, me){ return function(){ return fn.apply(me, arguments); }; },
-    hasProp = {}.hasOwnProperty;
-
-    /*
-    Utilities
-     */
-    var PivotData, PivotStream, addSeparators, aggregatorTemplates, aggregators, dayNamesEn, derivers, getSort, locales, mthNamesEn, naturalSort, numberFormat, pivotTableRenderer, rd, renderers, rx, rz, sortAs, usFmt, usFmtInt, usFmtPct, zeroPad;
-    addSeparators = function(nStr, thousandsSep, decimalSep) {
-      var rgx, x, x1, x2;
-      nStr += '';
-      x = nStr.split('.');
-      x1 = x[0];
-      x2 = x.length > 1 ? decimalSep + x[1] : '';
-      rgx = /(\d+)(\d{3})/;
-      while (rgx.test(x1)) {
-        x1 = x1.replace(rgx, '$1' + thousandsSep + '$2');
-      }
-      return x1 + x2;
-    };
-    numberFormat = function(opts) {
-      var defaults;
-      defaults = {
-        digitsAfterDecimal: 2,
-        scaler: 1,
-        thousandsSep: ",",
-        decimalSep: ".",
-        prefix: "",
-        suffix: ""
-      };
-      opts = Object.assign({}, defaults, opts);
-      return function(x) {
-        var result;
-        if (isNaN(x) || !isFinite(x)) {
-          return "";
-        }
-        result = addSeparators((opts.scaler * x).toFixed(opts.digitsAfterDecimal), opts.thousandsSep, opts.decimalSep);
-        return "" + opts.prefix + result + opts.suffix;
-      };
-    };
-    usFmt = numberFormat();
-    usFmtInt = numberFormat({
-      digitsAfterDecimal: 0
-    });
-    usFmtPct = numberFormat({
-      digitsAfterDecimal: 1,
-      scaler: 100,
-      suffix: "%"
-    });
-    aggregatorTemplates = {
-      count: function(formatter) {
-        if (formatter == null) {
-          formatter = usFmtInt;
-        }
-        return function() {
-          return function(data, rowKey, colKey) {
-            return {
-              count: 0,
-              push: function() {
-                return this.count++;
-              },
-              value: function() {
-                return this.count;
-              },
-              format: formatter
-            };
-          };
-        };
-      },
-      uniques: function(fn, formatter) {
-        if (formatter == null) {
-          formatter = usFmtInt;
-        }
-        return function(arg) {
-          var attr;
-          attr = arg[0];
-          return function(data, rowKey, colKey) {
-            return {
-              uniq: [],
-              push: function(record) {
-                var ref;
-                if (ref = record[attr], indexOf.call(this.uniq, ref) < 0) {
-                  return this.uniq.push(record[attr]);
-                }
-              },
-              value: function() {
-                return fn(this.uniq);
-              },
-              format: formatter,
-              numInputs: attr != null ? 0 : 1
-            };
-          };
-        };
-      },
-      sum: function(formatter) {
-        if (formatter == null) {
-          formatter = usFmt;
-        }
-        return function(arg) {
-          var attr;
-          attr = arg[0];
-          return function(data, rowKey, colKey) {
-            return {
-              sum: 0,
-              push: function(record) {
-                if (!isNaN(parseFloat(record[attr]))) {
-                  return this.sum += parseFloat(record[attr]);
-                }
-              },
-              value: function() {
-                return this.sum;
-              },
-              format: formatter,
-              numInputs: attr != null ? 0 : 1
-            };
-          };
-        };
-      },
-      extremes: function(mode, formatter) {
-        if (formatter == null) {
-          formatter = usFmt;
-        }
-        return function(arg) {
-          var attr;
-          attr = arg[0];
-          return function(data, rowKey, colKey) {
-            return {
-              val: null,
-              sorter: getSort(data != null ? data.sorters : void 0, attr),
-              push: function(record) {
-                var ref, ref1, ref2, x;
-                x = record[attr];
-                if (mode === "min" || mode === "max") {
-                  x = parseFloat(x);
-                  if (!isNaN(x)) {
-                    this.val = Math[mode](x, (ref = this.val) != null ? ref : x);
-                  }
-                }
-                if (mode === "first") {
-                  if (this.sorter(x, (ref1 = this.val) != null ? ref1 : x) <= 0) {
-                    this.val = x;
-                  }
-                }
-                if (mode === "last") {
-                  if (this.sorter(x, (ref2 = this.val) != null ? ref2 : x) >= 0) {
-                    return this.val = x;
-                  }
-                }
-              },
-              value: function() {
-                return this.val;
-              },
-              format: function(x) {
-                if (isNaN(x)) {
-                  return x;
-                } else {
-                  return formatter(x);
-                }
-              },
-              numInputs: attr != null ? 0 : 1
-            };
-          };
-        };
-      },
-      quantile: function(q, formatter) {
-        if (formatter == null) {
-          formatter = usFmt;
-        }
-        return function(arg) {
-          var attr;
-          attr = arg[0];
-          return function(data, rowKey, colKey) {
-            return {
-              vals: [],
-              push: function(record) {
-                var x;
-                x = parseFloat(record[attr]);
-                if (!isNaN(x)) {
-                  return this.vals.push(x);
-                }
-              },
-              value: function() {
-                var i;
-                if (this.vals.length === 0) {
-                  return null;
-                }
-                this.vals.sort(function(a, b) {
-                  return a - b;
-                });
-                i = (this.vals.length - 1) * q;
-                return (this.vals[Math.floor(i)] + this.vals[Math.ceil(i)]) / 2.0;
-              },
-              format: formatter,
-              numInputs: attr != null ? 0 : 1
-            };
-          };
-        };
-      },
-      runningStat: function(mode, ddof, formatter) {
-        if (mode == null) {
-          mode = "mean";
-        }
-        if (ddof == null) {
-          ddof = 1;
-        }
-        if (formatter == null) {
-          formatter = usFmt;
-        }
-        return function(arg) {
-          var attr;
-          attr = arg[0];
-          return function(data, rowKey, colKey) {
-            return {
-              n: 0.0,
-              m: 0.0,
-              s: 0.0,
-              push: function(record) {
-                var m_new, x;
-                x = parseFloat(record[attr]);
-                if (isNaN(x)) {
-                  return;
-                }
-                this.n += 1.0;
-                if (this.n === 1.0) {
-                  return this.m = x;
-                } else {
-                  m_new = this.m + (x - this.m) / this.n;
-                  this.s = this.s + (x - this.m) * (x - m_new);
-                  return this.m = m_new;
-                }
-              },
-              value: function() {
-                if (mode === "mean") {
-                  if (this.n === 0) {
-                    return 0 / 0;
-                  } else {
-                    return this.m;
-                  }
-                }
-                if (this.n <= ddof) {
-                  return 0;
-                }
-                switch (mode) {
-                  case "var":
-                    return this.s / (this.n - ddof);
-                  case "stdev":
-                    return Math.sqrt(this.s / (this.n - ddof));
-                }
-              },
-              format: formatter,
-              numInputs: attr != null ? 0 : 1
-            };
-          };
-        };
-      },
-      sumOverSum: function(formatter) {
-        if (formatter == null) {
-          formatter = usFmt;
-        }
-        return function(arg) {
-          var denom, num;
-          num = arg[0], denom = arg[1];
-          return function(data, rowKey, colKey) {
-            return {
-              sumNum: 0,
-              sumDenom: 0,
-              push: function(record) {
-                if (!isNaN(parseFloat(record[num]))) {
-                  this.sumNum += parseFloat(record[num]);
-                }
-                if (!isNaN(parseFloat(record[denom]))) {
-                  return this.sumDenom += parseFloat(record[denom]);
-                }
-              },
-              value: function() {
-                return this.sumNum / this.sumDenom;
-              },
-              format: formatter,
-              numInputs: (num != null) && (denom != null) ? 0 : 2
-            };
-          };
-        };
-      },
-      sumOverSumBound80: function(upper, formatter) {
-        if (upper == null) {
-          upper = true;
-        }
-        if (formatter == null) {
-          formatter = usFmt;
-        }
-        return function(arg) {
-          var denom, num;
-          num = arg[0], denom = arg[1];
-          return function(data, rowKey, colKey) {
-            return {
-              sumNum: 0,
-              sumDenom: 0,
-              push: function(record) {
-                if (!isNaN(parseFloat(record[num]))) {
-                  this.sumNum += parseFloat(record[num]);
-                }
-                if (!isNaN(parseFloat(record[denom]))) {
-                  return this.sumDenom += parseFloat(record[denom]);
-                }
-              },
-              value: function() {
-                var sign;
-                sign = upper ? 1 : -1;
-                return (0.821187207574908 / this.sumDenom + this.sumNum / this.sumDenom + 1.2815515655446004 * sign * Math.sqrt(0.410593603787454 / (this.sumDenom * this.sumDenom) + (this.sumNum * (1 - this.sumNum / this.sumDenom)) / (this.sumDenom * this.sumDenom))) / (1 + 1.642374415149816 / this.sumDenom);
-              },
-              format: formatter,
-              numInputs: (num != null) && (denom != null) ? 0 : 2
-            };
-          };
-        };
-      },
-      fractionOf: function(wrapped, type, formatter) {
-        if (type == null) {
-          type = "total";
-        }
-        if (formatter == null) {
-          formatter = usFmtPct;
-        }
-        return function() {
-          var x;
-          x = 1 <= arguments.length ? slice.call(arguments, 0) : [];
-          return function(data, rowKey, colKey) {
-            return {
-              selector: {
-                total: [[], []],
-                row: [rowKey, []],
-                col: [[], colKey]
-              }[type],
-              inner: wrapped.apply(null, x)(data, rowKey, colKey),
-              push: function(record) {
-                return this.inner.push(record);
-              },
-              format: formatter,
-              value: function() {
-                return this.inner.value() / data.getAggregator.apply(data, this.selector).inner.value();
-              },
-              numInputs: wrapped.apply(null, x)().numInputs
-            };
-          };
-        };
-      }
-    };
-    aggregatorTemplates.countUnique = function(f) {
-      return aggregatorTemplates.uniques((function(x) {
-        return x.length;
-      }), f);
-    };
-    aggregatorTemplates.listUnique = function(s) {
-      return aggregatorTemplates.uniques((function(x) {
-        return x.sort(naturalSort).join(s);
-      }), (function(x) {
-        return x;
-      }));
-    };
-    aggregatorTemplates.max = function(f) {
-      return aggregatorTemplates.extremes('max', f);
-    };
-    aggregatorTemplates.min = function(f) {
-      return aggregatorTemplates.extremes('min', f);
-    };
-    aggregatorTemplates.first = function(f) {
-      return aggregatorTemplates.extremes('first', f);
-    };
-    aggregatorTemplates.last = function(f) {
-      return aggregatorTemplates.extremes('last', f);
-    };
-    aggregatorTemplates.median = function(f) {
-      return aggregatorTemplates.quantile(0.5, f);
-    };
-    aggregatorTemplates.average = function(f) {
-      return aggregatorTemplates.runningStat("mean", 1, f);
-    };
-    aggregatorTemplates["var"] = function(ddof, f) {
-      return aggregatorTemplates.runningStat("var", ddof, f);
-    };
-    aggregatorTemplates.stdev = function(ddof, f) {
-      return aggregatorTemplates.runningStat("stdev", ddof, f);
-    };
-    aggregators = (function(tpl) {
-      return {
-        "Count": tpl.count(usFmtInt),
-        "Count Unique Values": tpl.countUnique(usFmtInt),
-        "List Unique Values": tpl.listUnique(", "),
-        "Sum": tpl.sum(usFmt),
-        "Integer Sum": tpl.sum(usFmtInt),
-        "Average": tpl.average(usFmt),
-        "Median": tpl.median(usFmt),
-        "Sample Variance": tpl["var"](1, usFmt),
-        "Sample Standard Deviation": tpl.stdev(1, usFmt),
-        "Minimum": tpl.min(usFmt),
-        "Maximum": tpl.max(usFmt),
-        "First": tpl.first(usFmt),
-        "Last": tpl.last(usFmt),
-        "Sum over Sum": tpl.sumOverSum(usFmt),
-        "80% Upper Bound": tpl.sumOverSumBound80(true, usFmt),
-        "80% Lower Bound": tpl.sumOverSumBound80(false, usFmt),
-        "Sum as Fraction of Total": tpl.fractionOf(tpl.sum(), "total", usFmtPct),
-        "Sum as Fraction of Rows": tpl.fractionOf(tpl.sum(), "row", usFmtPct),
-        "Sum as Fraction of Columns": tpl.fractionOf(tpl.sum(), "col", usFmtPct),
-        "Count as Fraction of Total": tpl.fractionOf(tpl.count(), "total", usFmtPct),
-        "Count as Fraction of Rows": tpl.fractionOf(tpl.count(), "row", usFmtPct),
-        "Count as Fraction of Columns": tpl.fractionOf(tpl.count(), "col", usFmtPct)
-      };
-    })(aggregatorTemplates);
-    renderers = {
-      "Table": function(data, opts) {
-        return pivotTableRenderer(data, opts);
-      },
-      "Table Barchart": function(data, opts) {
-        return $(pivotTableRenderer(data, opts)).barchart();
-      },
-      "Heatmap": function(data, opts) {
-        return $(pivotTableRenderer(data, opts)).heatmap("heatmap", opts);
-      },
-      "Row Heatmap": function(data, opts) {
-        return $(pivotTableRenderer(data, opts)).heatmap("rowheatmap", opts);
-      },
-      "Col Heatmap": function(data, opts) {
-        return $(pivotTableRenderer(data, opts)).heatmap("colheatmap", opts);
-      }
-    };
-    locales = {
-      en: {
-        aggregators: aggregators,
-        renderers: renderers,
-        localeStrings: {
-          renderError: "An error occurred rendering the PivotTable results.",
-          computeError: "An error occurred computing the PivotTable results.",
-          uiRenderError: "An error occurred rendering the PivotTable UI.",
-          selectAll: "Select All",
-          selectNone: "Select None",
-          tooMany: "(too many to list)",
-          filterResults: "Filter values",
-          apply: "Apply",
-          cancel: "Cancel",
-          totals: "Totals",
-          vs: "vs",
-          by: "by"
-        }
-      }
-    };
-    mthNamesEn = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    dayNamesEn = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    zeroPad = function(number) {
-      return ("0" + number).substr(-2, 2);
-    };
-    derivers = {
-      bin: function(col, binWidth) {
-        return function(record) {
-          return record[col] - record[col] % binWidth;
-        };
-      },
-      dateFormat: function(col, formatString, utcOutput, mthNames, dayNames) {
-        var utc;
-        if (utcOutput == null) {
-          utcOutput = false;
-        }
-        if (mthNames == null) {
-          mthNames = mthNamesEn;
-        }
-        if (dayNames == null) {
-          dayNames = dayNamesEn;
-        }
-        utc = utcOutput ? "UTC" : "";
-        return function(record) {
-          var date;
-          date = new Date(Date.parse(record[col]));
-          if (isNaN(date)) {
-            return "";
-          }
-          return formatString.replace(/%(.)/g, function(m, p) {
-            switch (p) {
-              case "y":
-                return date["get" + utc + "FullYear"]();
-              case "m":
-                return zeroPad(date["get" + utc + "Month"]() + 1);
-              case "n":
-                return mthNames[date["get" + utc + "Month"]()];
-              case "d":
-                return zeroPad(date["get" + utc + "Date"]());
-              case "w":
-                return dayNames[date["get" + utc + "Day"]()];
-              case "x":
-                return date["get" + utc + "Day"]();
-              case "H":
-                return zeroPad(date["get" + utc + "Hours"]());
-              case "M":
-                return zeroPad(date["get" + utc + "Minutes"]());
-              case "S":
-                return zeroPad(date["get" + utc + "Seconds"]());
-              default:
-                return "%" + p;
-            }
-          });
-        };
-      }
-    };
-    rx = /(\d+)|(\D+)/g;
-    rd = /\d/;
-    rz = /^0/;
-    naturalSort = (function(_this) {
-      return function(as, bs) {
-        var a, a1, b, b1, nas, nbs;
-        if ((bs != null) && (as == null)) {
-          return -1;
-        }
-        if ((as != null) && (bs == null)) {
-          return 1;
-        }
-        if (typeof as === "number" && isNaN(as)) {
-          return -1;
-        }
-        if (typeof bs === "number" && isNaN(bs)) {
-          return 1;
-        }
-        nas = +as;
-        nbs = +bs;
-        if (nas < nbs) {
-          return -1;
-        }
-        if (nas > nbs) {
-          return 1;
-        }
-        if (typeof as === "number" && typeof bs !== "number") {
-          return -1;
-        }
-        if (typeof bs === "number" && typeof as !== "number") {
-          return 1;
-        }
-        if (typeof as === "number" && typeof bs === "number") {
-          return 0;
-        }
-        if (isNaN(nbs) && !isNaN(nas)) {
-          return -1;
-        }
-        if (isNaN(nas) && !isNaN(nbs)) {
-          return 1;
-        }
-        a = String(as);
-        b = String(bs);
-        if (a === b) {
-          return 0;
-        }
-        if (!(rd.test(a) && rd.test(b))) {
-          return (a > b ? 1 : -1);
-        }
-        a = a.match(rx);
-        b = b.match(rx);
-        while (a.length && b.length) {
-          a1 = a.shift();
-          b1 = b.shift();
-          if (a1 !== b1) {
-            if (rd.test(a1) && rd.test(b1)) {
-              return a1.replace(rz, ".0") - b1.replace(rz, ".0");
-            } else {
-              return (a1 > b1 ? 1 : -1);
-            }
-          }
-        }
-        return a.length - b.length;
-      };
-    })(this);
-    sortAs = function(order) {
-      var i, l_mapping, mapping, x;
-      mapping = {};
-      l_mapping = {};
-      for (i in order) {
-        x = order[i];
-        mapping[x] = i;
-        if (typeof x === "string") {
-          l_mapping[x.toLowerCase()] = i;
-        }
-      }
-      return function(a, b) {
-        if ((mapping[a] != null) && (mapping[b] != null)) {
-          return mapping[a] - mapping[b];
-        } else if (mapping[a] != null) {
-          return -1;
-        } else if (mapping[b] != null) {
-          return 1;
-        } else if ((l_mapping[a] != null) && (l_mapping[b] != null)) {
-          return l_mapping[a] - l_mapping[b];
-        } else if (l_mapping[a] != null) {
-          return -1;
-        } else if (l_mapping[b] != null) {
-          return 1;
-        } else {
-          return naturalSort(a, b);
-        }
-      };
-    };
-    getSort = function(sorters, attr) {
-      var sort;
-      if (sorters != null) {
-        if (typeof sorters === "function") {
-          sort = sorters(attr);
-          if (typeof sort === "function") {
-            return sort;
-          }
-        } else if (sorters[attr] != null) {
-          return sorters[attr];
-        }
-      }
-      return naturalSort;
-    };
-
-    /*
-    Data Model class
-     */
-    PivotData = (function() {
-      function PivotData(input, opts) {
-        var i, l, len, ref, ref1, ref10, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9;
-        if (opts == null) {
-          opts = {};
-        }
-        this.getAggregator = bind(this.getAggregator, this);
-        this.getRowKeys = bind(this.getRowKeys, this);
-        this.getColKeys = bind(this.getColKeys, this);
-        this.sortKeys = bind(this.sortKeys, this);
-        this.arrSort = bind(this.arrSort, this);
-        this.input = input;
-        this.aggregator = (ref = opts.aggregator) != null ? ref : aggregatorTemplates.count()();
-        this.aggregatorName = (ref1 = opts.aggregatorName) != null ? ref1 : "Count";
-        this.colAttrs = (ref2 = opts.cols) != null ? ref2 : [];
-        this.rowAttrs = (ref3 = opts.rows) != null ? ref3 : [];
-        this.valAttrs = (ref4 = opts.vals) != null ? ref4 : [];
-        this.sorters = (ref5 = opts.sorters) != null ? ref5 : {};
-        this.rowOrder = (ref6 = opts.rowOrder) != null ? ref6 : "key_a_to_z";
-        this.colOrder = (ref7 = opts.colOrder) != null ? ref7 : "key_a_to_z";
-        this.derivedAttributes = (ref8 = opts.derivedAttributes) != null ? ref8 : {};
-        this.filter = (ref9 = opts.filter) != null ? ref9 : (function() {
-          return true;
-        });
-        this.tree = {};
-        this.rowKeys = [];
-        this.colKeys = [];
-        this.rowTotals = {};
-        this.colTotals = {};
-        this.allTotal = this.aggregator(this, [], []);
-        this.sorted = false;
-        if (!opts.lazy) {
-          if (input.columnFormat && Object.keys(this.derivedAttributes).length === 0 && !opts.filter) {
-            len = input.columns[input.columnNames[0]].length;
-            for (i = l = 0, ref10 = len; 0 <= ref10 ? l < ref10 : l > ref10; i = 0 <= ref10 ? ++l : --l) {
-              this.processRecord(i, input);
-            }
-          } else {
-            PivotData.forEachRecord(this.input, this.derivedAttributes, (function(_this) {
-              return function(record) {
-                if (_this.filter(record)) {
-                  return _this.processRecord(record);
-                }
-              };
-            })(this));
-          }
-        }
-      }
-
-      PivotData.forEachRecord = function(input, derivedAttributes, f) {
-
-        // Build addRecord — the function every input branch calls once per row.
-        // Fast path: if no derivedAttributes are configured, skip the wrapper
-        // entirely and call f directly. No closure allocation, no extra function
-        // call per record.
-        // Slow path: wrap f so derived fields are injected onto the record first.
-        // derived != null ? derived : record[attr] means: if the deriver returns
-        // null/undefined, leave the existing field value alone rather than
-        // overwriting it.
-        let addRecord;
-        if (Object.keys(derivedAttributes).length === 0) {
-          addRecord = f;
-        } else {
-          addRecord = function(record) {
-            for (const attr in derivedAttributes) {
-              const deriver = derivedAttributes[attr];
-              const derived = deriver(record);
-              record[attr] = derived != null ? derived : record[attr];
-            }
-            f(record);
-          };
-        }
-
-        // --- Input format branches ---
-
-        // 1. Function — caller drives iteration themselves, just hand them addRecord
-        if (typeof input === "function") {
-          input(addRecord);
-
-        // 2. Columnar — data stored as parallel typed arrays, one per column.
-        //    Reassemble each row i as a plain object by reading across all columns
-        //    at index i. record is mutated in place each iteration — safe because
-        //    addRecord reads synchronously before the next iteration overwrites it.
-        } else if (input.columnFormat) {
-          const len    = input.columns[input.columnNames[0]].length;
-          const record = {};
-          for (let i = 0; i < len; i++) {
-            for (const name of input.columnNames) {
-              const col  = input.columns[name];
-              const dict = input.dicts != null ? input.dicts[name] : void 0;
-              // If column is dictionary-encoded, col[i] is an integer index into
-              // the dict array. Otherwise use the raw value directly.
-              record[name] = dict ? dict[col[i]] : col[i];
-            }
-            addRecord(record);
-          }
-
-        // 3. Array of arrays — first row is headers, remaining rows are data.
-        //    Zip each data row against the header row to produce a record object.
-        } else if (Array.isArray(input) && Array.isArray(input[0])) {
-          const headers = input[0];
-          for (let i = 1; i < input.length; i++) {
-            const row    = input[i];
-            const record = {};
-            for (let j = 0; j < headers.length; j++) {
-              record[headers[j]] = row[j];
-            }
-            addRecord(record);
-          }
-
-        // 4. Array of objects — the simplest case, pass each object straight through
-        } else if (Array.isArray(input)) {
-          for (const record of input) {
-            addRecord(record);
-          }
-
-        // 5. HTML table — read headers from <thead> th elements, then build a
-        //    record per <tbody> tr using the matching th as the field name
-        } else if (input instanceof HTMLElement) {
-          const headers = Array.prototype.slice.call(input.querySelectorAll("thead > tr > th"))
-            .map(function(th) { return th.textContent; });
-
-          input.querySelectorAll("tbody > tr").forEach(function(tr) {
-            const record = {};
-            tr.querySelectorAll("td").forEach(function(td, j) {
-              record[headers[j]] = td.textContent;
-            });
-            addRecord(record);
-          });
-
-        } else {
-          throw new Error("unknown input format");
-        }
-      };
-
-      PivotData.prototype.forEachMatchingRecord = function(criteria, callback) {
-        return PivotData.forEachRecord(this.input, this.derivedAttributes, (function(_this) {
-          return function(record) {
-            var k, ref, v;
-            if (!_this.filter(record)) {
-              return;
-            }
-            for (k in criteria) {
-              v = criteria[k];
-              if (v !== ((ref = record[k]) != null ? ref : "null")) {
-                return;
-              }
-            }
-            return callback(record);
-          };
-        })(this));
-      };
-
-      PivotData.prototype.arrSort = function(attrs) {
-        var a, sortersArr;
-        sortersArr = (function() {
-          var l, len1, results;
-          results = [];
-          for (l = 0, len1 = attrs.length; l < len1; l++) {
-            a = attrs[l];
-            results.push(getSort(this.sorters, a));
-          }
-          return results;
-        }).call(this);
-        return function(a, b) {
-          var comparison, i, sorter;
-          for (i in sortersArr) {
-            if (!hasProp.call(sortersArr, i)) continue;
-            sorter = sortersArr[i];
-            comparison = sorter(a[i], b[i]);
-            if (comparison !== 0) {
-              return comparison;
-            }
-          }
-          return 0;
-        };
-      };
-
-      PivotData.prototype.sortKeys = function() {
-        var v;
-        if (!this.sorted) {
-          this.sorted = true;
-          v = (function(_this) {
-            return function(r, c) {
-              return _this.getAggregator(r, c).value();
-            };
-          })(this);
-          switch (this.rowOrder) {
-            case "value_a_to_z":
-              this.rowKeys.sort((function(_this) {
-                return function(a, b) {
-                  return naturalSort(v(a, []), v(b, []));
-                };
-              })(this));
-              break;
-            case "value_z_to_a":
-              this.rowKeys.sort((function(_this) {
-                return function(a, b) {
-                  return -naturalSort(v(a, []), v(b, []));
-                };
-              })(this));
-              break;
-            default:
-              this.rowKeys.sort(this.arrSort(this.rowAttrs));
-          }
-          switch (this.colOrder) {
-            case "value_a_to_z":
-              return this.colKeys.sort((function(_this) {
-                return function(a, b) {
-                  return naturalSort(v([], a), v([], b));
-                };
-              })(this));
-            case "value_z_to_a":
-              return this.colKeys.sort((function(_this) {
-                return function(a, b) {
-                  return -naturalSort(v([], a), v([], b));
-                };
-              })(this));
-            default:
-              return this.colKeys.sort(this.arrSort(this.colAttrs));
-          }
-        }
-      };
-
-      PivotData.prototype.getColKeys = function() {
-        this.sortKeys();
-        return this.colKeys;
-      };
-
-      PivotData.prototype.getRowKeys = function() {
-        this.sortKeys();
-        return this.rowKeys;
-      };
-
-      PivotData.prototype.processRecord = function(recordOrIndex, columnarInput) {
-        const NULL_STR = String.fromCharCode(0);
-
-        // Helper: read a single value out of a columnar column at row index i.
-        // If the column is dictionary-encoded, decode the integer back to a string.
-        // Returns the string "null" if the column doesn't exist in the input.
-        function readColumnarValue(columnarInput, attr, i) {
-          const col  = columnarInput.columns[attr];
-          if (col == null) return "null";
-          const dict = columnarInput.dicts?.[attr];
-          return dict ? dict[col[i]] : col[i];
-        }
-
-        const colKey = [];
-        const rowKey = [];
-        let record;
-
-        if (columnarInput != null) {
-          // --- Columnar path ---
-          // recordOrIndex is a row index integer, not a record object.
-          // Read axis keys directly from the typed arrays — no record object needed
-          // for row/col attrs. Only build a minimal record for valAttrs so the
-          // aggregator's push(record) has something to read from.
-          const i = recordOrIndex;
-
-          for (const attr of this.colAttrs) {
-            colKey.push(readColumnarValue(columnarInput, attr, i));
-          }
-
-          for (const attr of this.rowAttrs) {
-            rowKey.push(readColumnarValue(columnarInput, attr, i));
-          }
-
-          // Only extract the value attributes the aggregator actually needs
-          record = {};
-          for (const attr of this.valAttrs) {
-            const col  = columnarInput.columns[attr];
-            const dict = columnarInput.dicts?.[attr];
-            record[attr] = col == null ? null : (dict ? dict[col[i]] : col[i]);
-          }
-
-        } else {
-          // --- Row-oriented path ---
-          // recordOrIndex is a plain object — read axis keys directly off it.
-          // Missing values become the string "null" so they appear as a labelled
-          // row/col in the output rather than being silently dropped.
-          record = recordOrIndex;
-
-          for (const attr of this.colAttrs) {
-            colKey.push(record[attr] != null ? record[attr] : "null");
-          }
-
-          for (const attr of this.rowAttrs) {
-            rowKey.push(record[attr] != null ? record[attr] : "null");
-          }
-        }
-
-        // Join multi-attribute keys into a single string using the null character
-        // as a separator — safe because null chars never appear in real values.
-        // e.g. ["East", "2024"] → "East\x002024"
-        const flatRowKey = rowKey.join(NULL_STR);
-        const flatColKey = colKey.join(NULL_STR);
-
-        // --- Push into the four aggregator buckets ---
-
-        // 1. Grand total — every record, no conditions
-        this.allTotal.push(record);
-
-        // 2. Row total — keyed by row attrs only
-        if (rowKey.length !== 0) {
-          if (!this.rowTotals[flatRowKey]) {
-            this.rowKeys.push(rowKey);
-            this.rowTotals[flatRowKey] = this.aggregator(this, rowKey, []);
-          }
-          this.rowTotals[flatRowKey].push(record);
-        }
-
-        // 3. Col total — keyed by col attrs only
-        if (colKey.length !== 0) {
-          if (!this.colTotals[flatColKey]) {
-            this.colKeys.push(colKey);
-            this.colTotals[flatColKey] = this.aggregator(this, [], colKey);
-          }
-          this.colTotals[flatColKey].push(record);
-        }
-
-        // 4. Cell — keyed by both row and col attrs
-        // Only exists when both axes are configured
-        if (rowKey.length !== 0 && colKey.length !== 0) {
-          if (!this.tree[flatRowKey]) {
-            this.tree[flatRowKey] = {};
-          }
-          if (!this.tree[flatRowKey][flatColKey]) {
-            this.tree[flatRowKey][flatColKey] = this.aggregator(this, rowKey, colKey);
-          }
-          this.tree[flatRowKey][flatColKey].push(record);
-        }
-      };
-
-      PivotData.prototype.pushRecord = function(record) {
-        if (this.filter(record)) {
-          this.sorted = false;
-          return this.processRecord(record);
-        }
-      };
-
-      PivotData.prototype.pushChunk = function(columnarInput, startIdx, endIdx) {
-        var i, l, ref, ref1, results;
-        this.sorted = false;
-        results = [];
-        for (i = l = ref = startIdx, ref1 = endIdx; ref <= ref1 ? l < ref1 : l > ref1; i = ref <= ref1 ? ++l : --l) {
-          results.push(this.processRecord(i, columnarInput));
-        }
-        return results;
-      };
-
-      PivotData.prototype.getAggregator = function(rowKey, colKey) {
-        var agg, flatColKey, flatRowKey;
-        flatRowKey = rowKey.join(String.fromCharCode(0));
-        flatColKey = colKey.join(String.fromCharCode(0));
-        if (rowKey.length === 0 && colKey.length === 0) {
-          agg = this.allTotal;
-        } else if (rowKey.length === 0) {
-          agg = this.colTotals[flatColKey];
-        } else if (colKey.length === 0) {
-          agg = this.rowTotals[flatRowKey];
-        } else {
-          agg = this.tree[flatRowKey][flatColKey];
-        }
-        return agg != null ? agg : {
-          value: (function() {
-            return null;
-          }),
-          format: function() {
-            return "";
-          }
-        };
-      };
-
-      return PivotData;
-
-    })();
-
-    // PivotStream: feeds PivotData from a streaming NDJSON source.
-    // Automatically builds columnar TypedArrays as records arrive —
-    // strings are dictionary-encoded on the fly, numbers stored as Float64.
-    // Column types are inferred from the first record, no schema needed.
-    // onComplete receives (null, totalCount, stream) where stream exposes
-    // _arrays and _dicts so the caller can build a columnarInput for PivotData.
-    //
-    // Usage:
-    //   var ps = new $.pivotUtilities.PivotStream({
-    //     onComplete: function(_, count, stream) {
-    //       var columnar = stream.toColumnar();
-    //       new PivotData(columnar, { rows: ["region"], cols: ["year"] });
-    //     }
-    //   });
-    //   ps.fromFetch("/api/data");
-    //   // or manually: ps.push(record); ... ps.done();
-    PivotStream = (function() {
-      function PivotStream(opts) {
-        var ref;
-        if (opts == null) { opts = {}; }
-        this.onComplete  = (ref = opts.onComplete) != null ? ref : function() {};
-        this._count      = 0;
-        this._colsInit   = false;
-        this._stringCols = [];
-        this._numericCols= [];
-        this._dicts      = {};
-        this._dictIndex  = {};
-        this._arrays     = {};
-      }
-
-      // Called on the first record to detect column types and set up arrays.
-      // Numeric columns get a plain array for Float64Array conversion later.
-      // String columns get a dict + Map-based index for O(1) encoding.
-      PivotStream.prototype._initCols = function(record) {
-        var keys = Object.keys(record), i, col, val;
-        for (i = 0; i < keys.length; i++) {
-          col = keys[i];
-          val = record[col];
-          if (typeof val === 'number') {
-            this._numericCols.push(col);
-            this._arrays[col] = [];
-          } else {
-            this._stringCols.push(col);
-            this._dicts[col]     = [];
-            this._dictIndex[col] = new Map();
-            this._arrays[col]    = [];
-          }
-        }
-        this._colsInit = true;
-      };
-
-      // Dictionary-encodes a string value for a column.
-      // First occurrence adds it to the dict; subsequent occurrences
-      // just return the existing index. O(1) via Map.
-      PivotStream.prototype._enc = function(col, val) {
-        var str = val != null ? String(val) : 'null';
-        if (!this._dictIndex[col].has(str)) {
-          this._dictIndex[col].set(str, this._dicts[col].length);
-          this._dicts[col].push(str);
-        }
-        return this._dictIndex[col].get(str);
-      };
-
-      // Push a single record. Column types detected on first call.
-      // No JS object is retained — values are immediately encoded into arrays.
-      PivotStream.prototype.push = function(record) {
-        var i, col;
-        if (!this._colsInit) this._initCols(record);
-        for (i = 0; i < this._stringCols.length; i++) {
-          col = this._stringCols[i];
-          this._arrays[col].push(this._enc(col, record[col]));
-        }
-        for (i = 0; i < this._numericCols.length; i++) {
-          col = this._numericCols[i];
-          this._arrays[col].push(Number(record[col]) || 0);
-        }
-        this._count++;
-      };
-
-      // Convert accumulated arrays into a columnarInput ready for PivotData.
-      // String cols become Uint16Arrays, numeric cols become Float64Arrays.
-      PivotStream.prototype.toColumnar = function() {
-        var i, col, columns = {}, columnNames = [], dicts = {};
-        var allCols = this._stringCols.concat(this._numericCols);
-        for (i = 0; i < allCols.length; i++) {
-          col = allCols[i];
-          columnNames.push(col);
-          if (this._stringCols.indexOf(col) !== -1) {
-            columns[col] = new Uint16Array(this._arrays[col]);
-            dicts[col]   = this._dicts[col];
-          } else {
-            columns[col] = new Float64Array(this._arrays[col]);
-          }
-        }
-        return { columnFormat: true, columnNames: columnNames, columns: columns, dicts: dicts };
-      };
-
-      // Signal end of stream. Fires onComplete(null, totalCount, stream).
-      // Call stream.toColumnar() inside onComplete to get the columnar dataset.
-      PivotStream.prototype.done = function() {
-        return this.onComplete(null, this._count, this);
-      };
-
-      // Consume a fetch response as NDJSON (one JSON object per line).
-      // Returns a Promise that resolves when the stream is fully consumed.
-      PivotStream.prototype.fromFetch = function(url, fetchOpts) {
-        var self = this;
-        return fetch(url, fetchOpts != null ? fetchOpts : {}).then(function(res) {
-          if (!res.ok) {
-            throw new Error("PivotStream fetch failed: " + res.status + " " + res.statusText);
-          }
-          var reader  = res.body.getReader();
-          var decoder = new TextDecoder();
-          var buffer  = "";
-          var pump = function() {
-            return reader.read().then(function(arg) {
-              var done = arg.done, value = arg.value;
-              if (done) {
-                var finalLines = buffer.split("\n");
-                for (var j = 0; j < finalLines.length; j++) {
-                  if (finalLines[j].trim().length > 0) {
-                    try { self.push(JSON.parse(finalLines[j])); } catch(e) {}
-                  }
-                }
-                self.done();
-                return;
-              }
-              buffer += decoder.decode(value, { stream: true });
-              var lines = buffer.split("\n");
-              buffer = lines.pop();
-              for (var i = 0; i < lines.length; i++) {
-                if (lines[i].trim().length > 0) {
-                  self.push(JSON.parse(lines[i]));
-                }
-              }
-              return pump();
-            });
-          };
-          return pump();
-        });
-      };
-
-      return PivotStream;
-
-    })();
-    $.pivotUtilities = {
-      aggregatorTemplates: aggregatorTemplates,
-      aggregators: aggregators,
-      renderers: renderers,
-      derivers: derivers,
-      locales: locales,
-      naturalSort: naturalSort,
-      numberFormat: numberFormat,
-      sortAs: sortAs,
-      PivotData: PivotData,
-      PivotStream: PivotStream
-    };
-
-    /*
-    Default Renderer for hierarchical table layout
-     */
-    pivotTableRenderer = function(pivotData, opts) {
-      // Merge options with defaults — nested so each sub-object gets its own defaults
-      const table = Object.assign({ clickCallback: null, rowTotals: true, colTotals: true }, opts && opts.table);
-      const localeStrings = Object.assign({ totals: "Totals" }, opts && opts.localeStrings);
-
-      const colAttrs = pivotData.colAttrs;
-      const rowAttrs = pivotData.rowAttrs;
-      const rowKeys  = pivotData.getRowKeys();
-      const colKeys  = pivotData.getColKeys();
-
-      // Returns the rowspan/colspan size for a merged header cell.
-      // Returns -1 if this cell should not render (it's covered by a span above/left).
-      function spanSize(arr, i, j) {
-        if (i !== 0) {
-          let noDraw = true;
-          for (let x = 0; x <= j; x++) {
-            if (arr[i - 1][x] !== arr[i][x]) { noDraw = false; break; }
-          }
-          if (noDraw) return -1;
-        }
-        let len = 0;
-        while (i + len < arr.length) {
-          let stop = false;
-          for (let x = 0; x <= j; x++) {
-            if (arr[i][x] !== arr[i + len][x]) { stop = true; break; }
-          }
-          if (stop) break;
-          len++;
-        }
-        return len;
-      }
-
-      // Builds a click handler that extracts row/col filters from the key arrays
-      // and calls the user-supplied clickCallback. Only created if callback provided.
-      const getClickHandler = table.clickCallback
-        ? function(value, rowValues, colValues) {
-            const filters = {};
-            colAttrs.forEach(function(attr, i) { if (colValues[i] != null) filters[attr] = colValues[i]; });
-            rowAttrs.forEach(function(attr, i) { if (rowValues[i] != null) filters[attr] = rowValues[i]; });
-            return function(e) { return table.clickCallback(e, value, filters, pivotData); };
-          }
-        : null;
-
-      const result = document.createElement("table");
-      result.className = "pvtTable";
-
-      // ── thead ────────────────────────────────────────────────────────────────
-      const thead = document.createElement("thead");
-
-      colAttrs.forEach(function(c, j) {
-        const tr = document.createElement("tr");
-
-        // Top-left corner cell spanning all row headers
-        if (j === 0 && rowAttrs.length !== 0) {
-          const th = document.createElement("th");
-          th.setAttribute("colspan", String(rowAttrs.length));
-          th.setAttribute("rowspan", String(colAttrs.length));
-          tr.appendChild(th);
-        }
-
-        // Column attribute label (e.g. "Year")
-        const axisLabel = document.createElement("th");
-        axisLabel.className = "pvtAxisLabel";
-        axisLabel.textContent = c;
-        tr.appendChild(axisLabel);
-
-        // Column value headers with spanning
-        colKeys.forEach(function(colKey, i) {
-          const span = spanSize(colKeys, i, j);
-          if (span !== -1) {
-            const th = document.createElement("th");
-            th.className = "pvtColLabel";
-            th.textContent = colKey[j];
-            th.setAttribute("colspan", String(span));
-            if (j === colAttrs.length - 1 && rowAttrs.length !== 0) {
-              th.setAttribute("rowspan", "2");
-            }
-            tr.appendChild(th);
-          }
-        });
-
-        // "Totals" header in top-right corner
-        if (j === 0 && table.rowTotals) {
-          const th = document.createElement("th");
-          th.className = "pvtTotalLabel pvtRowTotalLabel";
-          th.innerHTML = localeStrings.totals;
-          th.setAttribute("rowspan", String(colAttrs.length + (rowAttrs.length === 0 ? 0 : 1)));
-          tr.appendChild(th);
-        }
-
-        thead.appendChild(tr);
-      });
-
-      // Row attribute label row (e.g. "Region", "Category")
-      if (rowAttrs.length !== 0) {
-        const tr = document.createElement("tr");
-        rowAttrs.forEach(function(r) {
-          const th = document.createElement("th");
-          th.className = "pvtAxisLabel";
-          th.textContent = r;
-          tr.appendChild(th);
-        });
-        const th = document.createElement("th");
-        if (colAttrs.length === 0) {
-          th.className = "pvtTotalLabel pvtRowTotalLabel";
-          th.innerHTML = localeStrings.totals;
-        }
-        tr.appendChild(th);
-        thead.appendChild(tr);
-      }
-
-      result.appendChild(thead);
-
-      // ── tbody ────────────────────────────────────────────────────────────────
-      const tbody = document.createElement("tbody");
-
-      rowKeys.forEach(function(rowKey, i) {
-        const tr = document.createElement("tr");
-
-        // Row header cells with spanning
-        rowKey.forEach(function(txt, j) {
-          const span = spanSize(rowKeys, i, j);
-          if (span !== -1) {
-            const th = document.createElement("th");
-            th.className = "pvtRowLabel";
-            th.textContent = txt;
-            th.setAttribute("rowspan", String(span));
-            if (j === rowAttrs.length - 1 && colAttrs.length !== 0) {
-              th.setAttribute("colspan", "2");
-            }
-            tr.appendChild(th);
-          }
-        });
-
-        // Data cells
-        colKeys.forEach(function(colKey, j) {
-          const aggregator = pivotData.getAggregator(rowKey, colKey);
-          const val = aggregator.value();
-          const td = document.createElement("td");
-          td.className = "pvtVal row" + i + " col" + j;
-          td.textContent = aggregator.format(val);
-          td.setAttribute("data-value", val == null ? "" : String(val));
-          if (getClickHandler) td.onclick = getClickHandler(val, rowKey, colKey);
-          tr.appendChild(td);
-        });
-
-        // Row total cell
-        if (table.rowTotals || colAttrs.length === 0) {
-          const totalAggregator = pivotData.getAggregator(rowKey, []);
-          const val = totalAggregator.value();
-          const td = document.createElement("td");
-          td.className = "pvtTotal rowTotal";
-          td.textContent = totalAggregator.format(val);
-          td.setAttribute("data-value", val == null ? "" : String(val));
-          td.setAttribute("data-for", "row" + i);
-          if (getClickHandler) td.onclick = getClickHandler(val, rowKey, []);
-          tr.appendChild(td);
-        }
-
-        tbody.appendChild(tr);
-      });
-
-      // Column totals row
-      if (table.colTotals || rowAttrs.length === 0) {
-        const tr = document.createElement("tr");
-
-        const th = document.createElement("th");
-        th.className = "pvtTotalLabel pvtColTotalLabel";
-        th.innerHTML = localeStrings.totals;
-        th.setAttribute("colspan", String(rowAttrs.length + (colAttrs.length === 0 ? 0 : 1)));
-        tr.appendChild(th);
-
-        colKeys.forEach(function(colKey, j) {
-          const totalAggregator = pivotData.getAggregator([], colKey);
-          const val = totalAggregator.value();
-          const td = document.createElement("td");
-          td.className = "pvtTotal colTotal";
-          td.textContent = totalAggregator.format(val);
-          td.setAttribute("data-value", val == null ? "" : String(val));
-          td.setAttribute("data-for", "col" + j);
-          if (getClickHandler) td.onclick = getClickHandler(val, [], colKey);
-          tr.appendChild(td);
-        });
-
-        // Grand total cell
-        if (table.rowTotals || colAttrs.length === 0) {
-          const totalAggregator = pivotData.getAggregator([], []);
-          const val = totalAggregator.value();
-          const td = document.createElement("td");
-          td.className = "pvtGrandTotal";
-          td.textContent = totalAggregator.format(val);
-          td.setAttribute("data-value", val == null ? "" : String(val));
-          if (getClickHandler) td.onclick = getClickHandler(val, [], []);
-          tr.appendChild(td);
-        }
-
-        tbody.appendChild(tr);
-      }
-
-      result.appendChild(tbody);
-      result.setAttribute("data-numrows", String(rowKeys.length));
-      result.setAttribute("data-numcols", String(colKeys.length));
-      return result;
-    };
-
-    /*
-    Pivot Table core: create PivotData object and call Renderer on it
-     */
-    $.fn.pivot = function(input, inputOpts, locale) {
-      var defaults, e, localeDefaults, localeStrings, opts, pivotData, result, x;
-      if (locale == null) {
-        locale = "en";
-      }
-      if (locales[locale] == null) {
-        locale = "en";
-      }
-      defaults = {
-        cols: [],
-        rows: [],
-        vals: [],
-        rowOrder: "key_a_to_z",
-        colOrder: "key_a_to_z",
-        dataClass: PivotData,
-        filter: function() {
-          return true;
-        },
-        aggregator: aggregatorTemplates.count()(),
-        aggregatorName: "Count",
-        sorters: {},
-        derivedAttributes: {},
-        renderer: pivotTableRenderer
-      };
-      localeStrings = $.extend(true, {}, locales.en.localeStrings, locales[locale].localeStrings);
-      localeDefaults = {
-        rendererOptions: {
-          localeStrings: localeStrings
-        },
-        localeStrings: localeStrings
-      };
-      opts = $.extend(true, {}, localeDefaults, $.extend({}, defaults, inputOpts));
-      result = null;
-      try {
-        pivotData = new opts.dataClass(input, opts);
-        try {
-          result = opts.renderer(pivotData, opts.rendererOptions);
-        } catch (error) {
-          e = error;
-          if (typeof console !== "undefined" && console !== null) {
-            console.error(e.stack);
-          }
-          result = $("<span>").html(opts.localeStrings.renderError);
-        }
-      } catch (error) {
-        e = error;
-        if (typeof console !== "undefined" && console !== null) {
-          console.error(e.stack);
-        }
-        result = $("<span>").html(opts.localeStrings.computeError);
-      }
-      x = this[0];
-      while (x.hasChildNodes()) {
-        x.removeChild(x.lastChild);
-      }
-      return this.append(result);
-    };
-
-    /*
-    Pivot Table UI: calls Pivot Table core above with options set by user
-     */
-    $.fn.pivotUI = function(input, inputOpts, overwrite, locale) {
-      var a, aggregator, attr, attrLength, attrValues, c, colOrderArrow, defaults, e, existingOpts, fn1, i, initialRender, l, len1, len2, len3, localeDefaults, localeStrings, materializedInput, n, o, opts, ordering, pivotTable, recordsProcessed, ref, ref1, ref2, ref3, refresh, refreshDelayed, renderer, rendererControl, rowOrderArrow, shownAttributes, shownInAggregators, shownInDragDrop, tr1, tr2, uiTable, unused, unusedAttrsVerticalAutoCutoff, unusedAttrsVerticalAutoOverride, x;
-      if (overwrite == null) {
-        overwrite = false;
-      }
-      if (locale == null) {
-        locale = "en";
-      }
-      if (locales[locale] == null) {
-        locale = "en";
-      }
-      defaults = {
-        derivedAttributes: {},
-        aggregators: locales[locale].aggregators,
-        renderers: locales[locale].renderers,
-        hiddenAttributes: [],
-        hiddenFromAggregators: [],
-        hiddenFromDragDrop: [],
-        menuLimit: 500,
-        cols: [],
-        rows: [],
-        vals: [],
-        rowOrder: "key_a_to_z",
-        colOrder: "key_a_to_z",
-        dataClass: PivotData,
-        exclusions: {},
-        inclusions: {},
-        unusedAttrsVertical: 85,
-        autoSortUnusedAttrs: false,
-        onRefresh: null,
-        showUI: true,
-        filter: function() {
-          return true;
-        },
-        sorters: {}
-      };
-      localeStrings = $.extend(true, {}, locales.en.localeStrings, locales[locale].localeStrings);
-      localeDefaults = {
-        rendererOptions: {
-          localeStrings: localeStrings
-        },
-        localeStrings: localeStrings
-      };
-      existingOpts = this.data("pivotUIOptions");
-      if ((existingOpts == null) || overwrite) {
-        opts = $.extend(true, {}, localeDefaults, $.extend({}, defaults, inputOpts));
+/*
+ * PivotTable — core data layer.  Zero jQuery dependency.
+ * jQuery UI adapter ($.fn.pivot, $.fn.pivotUI, etc.) lives in
+ * src/adapters/jquery.ts and is built to dist/adapters/jquery.js.
+ */
+
+
+
+interface AggregatorInstance {
+  push(record: Record<string, any>): void;
+  value(): number | string | null;
+  format(x: number | string | null): string;
+  numInputs?: number;
+}
+
+interface NumberFormatOptions {
+  digitsAfterDecimal?: number;
+  scaler?: number;
+  thousandsSep?: string;
+  decimalSep?: string;
+  prefix?: string;
+  suffix?: string;
+}
+
+interface ColumnarInput {
+  columnFormat: true;
+  columnNames: string[];
+  columns: Record<string, Uint16Array | Float64Array>;
+  dicts?: Record<string, string[]>;
+}
+
+export type SortOrder = "key_a_to_z" | "key_z_to_a" | "value_a_to_z" | "value_z_to_a";
+
+interface PivotDataOptions {
+  aggregator?:        (pivotData: any, rowKey: string[], colKey: string[]) => AggregatorInstance;
+  aggregatorName?:    string;
+  cols?:              string[];
+  rows?:              string[];
+  vals?:              string[];
+  sorters?:           Record<string, (a: any, b: any) => number> | ((attr: string) => (a: any, b: any) => number);
+  rowOrder?:          SortOrder;
+  colOrder?:          SortOrder;
+  derivedAttributes?: Record<string, (record: Record<string, any>) => any>;
+  filter?:            (record: Record<string, any>) => boolean;
+  lazy?:              boolean;
+}
+
+// ─── Formatting utilities ─────────────────────────────────────────────────
+
+function addSeparators(nStr: any, thousandsSep: string, decimalSep: string): string {
+  nStr += '';
+  const x  = nStr.split('.');
+  let   x1 = x[0];
+  const x2 = x.length > 1 ? decimalSep + x[1] : '';
+  const rgx = /(\d+)(\d{3})/;
+  while (rgx.test(x1)) {
+    x1 = x1.replace(rgx, '$1' + thousandsSep + '$2');
+  }
+  return x1 + x2;
+}
+
+export function numberFormat(opts?: NumberFormatOptions): (x: any) => string {
+  const defaults = {
+    digitsAfterDecimal: 2,
+    scaler: 1,
+    thousandsSep: ",",
+    decimalSep: ".",
+    prefix: "",
+    suffix: ""
+  };
+  opts = Object.assign({}, defaults, opts);
+  return function(x: any): string {
+    if (isNaN(x) || !isFinite(x)) return "";
+    const result = addSeparators(
+      (opts.scaler * x).toFixed(opts.digitsAfterDecimal),
+      opts.thousandsSep,
+      opts.decimalSep
+    );
+    return "" + opts.prefix + result + opts.suffix;
+  };
+}
+
+const usFmt    = numberFormat();
+const usFmtInt = numberFormat({ digitsAfterDecimal: 0 });
+const usFmtPct = numberFormat({ digitsAfterDecimal: 1, scaler: 100, suffix: "%" });
+
+// ─── Sort utilities ───────────────────────────────────────────────────────
+
+const rx = /(\d+)|(\D+)/g;
+const rd = /\d/;
+const rz = /^0/;
+
+export const naturalSort = function(as: any, bs: any): number {
+  if ((bs != null) && (as == null)) return -1;
+  if ((as != null) && (bs == null)) return  1;
+  if (typeof as === "number" && isNaN(as)) return -1;
+  if (typeof bs === "number" && isNaN(bs)) return  1;
+  const nas = +as;
+  const nbs = +bs;
+  if (nas < nbs) return -1;
+  if (nas > nbs) return  1;
+  if (typeof as === "number" && typeof bs !== "number") return -1;
+  if (typeof bs === "number" && typeof as !== "number") return  1;
+  if (typeof as === "number" && typeof bs === "number") return  0;
+  if (isNaN(nbs) && !isNaN(nas)) return -1;
+  if (isNaN(nas) && !isNaN(nbs)) return  1;
+  const a = String(as);
+  const b = String(bs);
+  if (a === b) return 0;
+  if (!(rd.test(a) && rd.test(b))) return a > b ? 1 : -1;
+  const aParts: any[] = a.match(rx)!;
+  const bParts: any[] = b.match(rx)!;
+  while (aParts.length && bParts.length) {
+    const a1 = aParts.shift();
+    const b1 = bParts.shift();
+    if (a1 !== b1) {
+      if (rd.test(a1) && rd.test(b1)) {
+        return a1.replace(rz, ".0") - b1.replace(rz, ".0");
       } else {
-        opts = existingOpts;
+        return a1 > b1 ? 1 : -1;
       }
-      try {
-        attrValues = {};
-        materializedInput = [];
-        recordsProcessed = 0;
-        PivotData.forEachRecord(input, opts.derivedAttributes, function(record) {
-          var attr, base, ref, value;
-          if (!opts.filter(record)) {
-            return;
-          }
-          materializedInput.push(record);
-          for (attr in record) {
-            if (!hasProp.call(record, attr)) continue;
-            if (attrValues[attr] == null) {
-              attrValues[attr] = {};
-              if (recordsProcessed > 0) {
-                attrValues[attr]["null"] = recordsProcessed;
-              }
+    }
+  }
+  return aParts.length - bParts.length;
+};
+
+export const sortAs = function(order: any[]): (a: any, b: any) => number {
+  const mapping:   Record<string, any> = {};
+  const l_mapping: Record<string, any> = {};
+  for (const i in order) {
+    const x = order[i];
+    mapping[x] = i;
+    if (typeof x === "string") l_mapping[x.toLowerCase()] = i;
+  }
+  return function(a: any, b: any): number {
+    if ((mapping[a] != null) && (mapping[b] != null)) return mapping[a]   - mapping[b];
+    if (mapping[a] != null)                           return -1;
+    if (mapping[b] != null)                           return  1;
+    if ((l_mapping[a] != null) && (l_mapping[b] != null)) return l_mapping[a] - l_mapping[b];
+    if (l_mapping[a] != null) return -1;
+    if (l_mapping[b] != null) return  1;
+    return naturalSort(a, b);
+  };
+};
+
+export const getSort = function(sorters: any, attr: string): (a: any, b: any) => number {
+  if (sorters != null) {
+    if (typeof sorters === "function") {
+      const sort = sorters(attr);
+      if (typeof sort === "function") return sort;
+    } else if (sorters[attr] != null) {
+      return sorters[attr];
+    }
+  }
+  return naturalSort;
+};
+
+// ─── Aggregator templates ─────────────────────────────────────────────────
+
+export const aggregatorTemplates: Record<string, any> = {
+  count: function(formatter?: any) {
+    if (formatter == null) formatter = usFmtInt;
+    return function() {
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          count: 0,
+          push:   function()       { this.count++; },
+          value:  function()       { return this.count; },
+          format: formatter
+        };
+      };
+    };
+  },
+
+  uniques: function(fn: any, formatter?: any) {
+    if (formatter == null) formatter = usFmtInt;
+    return function(arg: any) {
+      const attr = arg[0];
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          uniq: [] as any[],
+          push: function(record: any) {
+            if (this.uniq.indexOf(record[attr]) < 0) this.uniq.push(record[attr]);
+          },
+          value:  function() { return fn(this.uniq); },
+          format: formatter,
+          numInputs: attr != null ? 0 : 1
+        };
+      };
+    };
+  },
+
+  sum: function(formatter?: any) {
+    if (formatter == null) formatter = usFmt;
+    return function(arg: any) {
+      const attr = arg[0];
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          sum: 0,
+          push: function(record: any) {
+            if (!isNaN(parseFloat(record[attr]))) this.sum += parseFloat(record[attr]);
+          },
+          value:  function() { return this.sum; },
+          format: formatter,
+          numInputs: attr != null ? 0 : 1
+        };
+      };
+    };
+  },
+
+  extremes: function(mode: string, formatter?: any) {
+    if (formatter == null) formatter = usFmt;
+    return function(arg: any) {
+      const attr = arg[0];
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          val: null as any,
+          sorter: getSort(data != null ? data.sorters : void 0, attr),
+          push: function(record: any) {
+            let x = record[attr];
+            if (mode === "min" || mode === "max") {
+              x = parseFloat(x);
+              if (!isNaN(x)) this.val = Math[mode](x, this.val != null ? this.val : x);
             }
-          }
-          for (attr in attrValues) {
-            value = (ref = record[attr]) != null ? ref : "null";
-            if ((base = attrValues[attr])[value] == null) {
-              base[value] = 0;
+            if (mode === "first") {
+              if (this.sorter(x, this.val != null ? this.val : x) <= 0) this.val = x;
             }
-            attrValues[attr][value]++;
-          }
-          return recordsProcessed++;
-        });
-        uiTable = $("<table>", {
-          "class": "pvtUi"
-        }).attr("cellpadding", 5);
-        rendererControl = $("<td>").addClass("pvtUiCell");
-        renderer = $("<select>").addClass('pvtRenderer').appendTo(rendererControl).bind("change", function() {
-          return refresh();
-        });
-        ref = opts.renderers;
-        for (x in ref) {
-          if (!hasProp.call(ref, x)) continue;
-          $("<option>").val(x).html(x).appendTo(renderer);
-        }
-        unused = $("<td>").addClass('pvtAxisContainer pvtUnused pvtUiCell');
-        shownAttributes = (function() {
-          var results;
-          results = [];
-          for (a in attrValues) {
-            if (indexOf.call(opts.hiddenAttributes, a) < 0) {
-              results.push(a);
+            if (mode === "last") {
+              if (this.sorter(x, this.val != null ? this.val : x) >= 0) this.val = x;
             }
-          }
-          return results;
-        })();
-        shownInAggregators = (function() {
-          var l, len1, results;
-          results = [];
-          for (l = 0, len1 = shownAttributes.length; l < len1; l++) {
-            c = shownAttributes[l];
-            if (indexOf.call(opts.hiddenFromAggregators, c) < 0) {
-              results.push(c);
-            }
-          }
-          return results;
-        })();
-        shownInDragDrop = (function() {
-          var l, len1, results;
-          results = [];
-          for (l = 0, len1 = shownAttributes.length; l < len1; l++) {
-            c = shownAttributes[l];
-            if (indexOf.call(opts.hiddenFromDragDrop, c) < 0) {
-              results.push(c);
-            }
-          }
-          return results;
-        })();
-        unusedAttrsVerticalAutoOverride = false;
-        if (opts.unusedAttrsVertical === "auto") {
-          unusedAttrsVerticalAutoCutoff = 120;
-        } else {
-          unusedAttrsVerticalAutoCutoff = parseInt(opts.unusedAttrsVertical);
-        }
-        if (!isNaN(unusedAttrsVerticalAutoCutoff)) {
-          attrLength = 0;
-          for (l = 0, len1 = shownInDragDrop.length; l < len1; l++) {
-            a = shownInDragDrop[l];
-            attrLength += a.length;
-          }
-          unusedAttrsVerticalAutoOverride = attrLength > unusedAttrsVerticalAutoCutoff;
-        }
-        if (opts.unusedAttrsVertical === true || unusedAttrsVerticalAutoOverride) {
-          unused.addClass('pvtVertList');
-        } else {
-          unused.addClass('pvtHorizList');
-        }
-        fn1 = function(attr) {
-          var attrElem, checkContainer, closeFilterBox, controls, filterItem, filterItemExcluded, finalButtons, hasExcludedItem, len2, n, placeholder, ref1, sorter, triangleLink, v, value, valueCount, valueList, values;
-          values = (function() {
-            var results;
-            results = [];
-            for (v in attrValues[attr]) {
-              results.push(v);
-            }
-            return results;
-          })();
-          hasExcludedItem = false;
-          valueList = $("<div>").addClass('pvtFilterBox').hide();
-          valueList.append($("<h4>").append($("<span>").text(attr), $("<span>").addClass("count").text("(" + values.length + ")")));
-          if (values.length > opts.menuLimit) {
-            valueList.append($("<p>").html(opts.localeStrings.tooMany));
-          } else {
-            if (values.length > 5) {
-              controls = $("<p>").appendTo(valueList);
-              sorter = getSort(opts.sorters, attr);
-              placeholder = opts.localeStrings.filterResults;
-              $("<input>", {
-                type: "text"
-              }).appendTo(controls).attr({
-                placeholder: placeholder,
-                "class": "pvtSearch"
-              }).bind("keyup", function() {
-                var accept, accept_gen, filter;
-                filter = $(this).val().toLowerCase().trim();
-                accept_gen = function(prefix, accepted) {
-                  return function(v) {
-                    var real_filter, ref1;
-                    real_filter = filter.substring(prefix.length).trim();
-                    if (real_filter.length === 0) {
-                      return true;
-                    }
-                    return ref1 = Math.sign(sorter(v.toLowerCase(), real_filter)), indexOf.call(accepted, ref1) >= 0;
-                  };
-                };
-                accept = filter.indexOf(">=") === 0 ? accept_gen(">=", [1, 0]) : filter.indexOf("<=") === 0 ? accept_gen("<=", [-1, 0]) : filter.indexOf(">") === 0 ? accept_gen(">", [1]) : filter.indexOf("<") === 0 ? accept_gen("<", [-1]) : filter.indexOf("~") === 0 ? function(v) {
-                  if (filter.substring(1).trim().length === 0) {
-                    return true;
-                  }
-                  return v.toLowerCase().match(filter.substring(1));
-                } : function(v) {
-                  return v.toLowerCase().indexOf(filter) !== -1;
-                };
-                return valueList.find('.pvtCheckContainer p label span.value').each(function() {
-                  if (accept($(this).text())) {
-                    return $(this).parent().parent().show();
-                  } else {
-                    return $(this).parent().parent().hide();
-                  }
-                });
-              });
-              controls.append($("<br>"));
-              $("<button>", {
-                type: "button"
-              }).appendTo(controls).html(opts.localeStrings.selectAll).bind("click", function() {
-                valueList.find("input:visible:not(:checked)").prop("checked", true).toggleClass("changed");
-                return false;
-              });
-              $("<button>", {
-                type: "button"
-              }).appendTo(controls).html(opts.localeStrings.selectNone).bind("click", function() {
-                valueList.find("input:visible:checked").prop("checked", false).toggleClass("changed");
-                return false;
-              });
-            }
-            checkContainer = $("<div>").addClass("pvtCheckContainer").appendTo(valueList);
-            ref1 = values.sort(getSort(opts.sorters, attr));
-            for (n = 0, len2 = ref1.length; n < len2; n++) {
-              value = ref1[n];
-              valueCount = attrValues[attr][value];
-              filterItem = $("<label>");
-              filterItemExcluded = false;
-              if (opts.inclusions[attr]) {
-                filterItemExcluded = (indexOf.call(opts.inclusions[attr], value) < 0);
-              } else if (opts.exclusions[attr]) {
-                filterItemExcluded = (indexOf.call(opts.exclusions[attr], value) >= 0);
-              }
-              hasExcludedItem || (hasExcludedItem = filterItemExcluded);
-              $("<input>").attr("type", "checkbox").addClass('pvtFilter').attr("checked", !filterItemExcluded).data("filter", [attr, value]).appendTo(filterItem).bind("change", function() {
-                return $(this).toggleClass("changed");
-              });
-              filterItem.append($("<span>").addClass("value").text(value));
-              filterItem.append($("<span>").addClass("count").text("(" + valueCount + ")"));
-              checkContainer.append($("<p>").append(filterItem));
-            }
-          }
-          closeFilterBox = function() {
-            if (valueList.find("[type='checkbox']").length > valueList.find("[type='checkbox']:checked").length) {
-              attrElem.addClass("pvtFilteredAttribute");
+          },
+          value:  function() { return this.val; },
+          format: function(x: any) { return isNaN(x) ? x : formatter(x); },
+          numInputs: attr != null ? 0 : 1
+        };
+      };
+    };
+  },
+
+  quantile: function(q: number, formatter?: any) {
+    if (formatter == null) formatter = usFmt;
+    return function(arg: any) {
+      const attr = arg[0];
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          vals: [] as number[],
+          push: function(record: any) {
+            const x = parseFloat(record[attr]);
+            if (!isNaN(x)) this.vals.push(x);
+          },
+          value: function() {
+            if (this.vals.length === 0) return null;
+            this.vals.sort((a: number, b: number) => a - b);
+            const i = (this.vals.length - 1) * q;
+            return (this.vals[Math.floor(i)] + this.vals[Math.ceil(i)]) / 2.0;
+          },
+          format: formatter,
+          numInputs: attr != null ? 0 : 1
+        };
+      };
+    };
+  },
+
+  runningStat: function(mode: string = "mean", ddof: number = 1, formatter?: any) {
+    if (formatter == null) formatter = usFmt;
+    return function(arg: any) {
+      const attr = arg[0];
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          n: 0.0, m: 0.0, s: 0.0,
+          push: function(record: any) {
+            const x = parseFloat(record[attr]);
+            if (isNaN(x)) return;
+            this.n += 1.0;
+            if (this.n === 1.0) {
+              this.m = x;
             } else {
-              attrElem.removeClass("pvtFilteredAttribute");
+              const m_new = this.m + (x - this.m) / this.n;
+              this.s = this.s + (x - this.m) * (x - m_new);
+              this.m = m_new;
             }
-            valueList.find('.pvtSearch').val('');
-            valueList.find('.pvtCheckContainer p').show();
-            return valueList.hide();
-          };
-          finalButtons = $("<p>").appendTo(valueList);
-          if (values.length <= opts.menuLimit) {
-            $("<button>", {
-              type: "button"
-            }).text(opts.localeStrings.apply).appendTo(finalButtons).bind("click", function() {
-              if (valueList.find(".changed").removeClass("changed").length) {
-                refresh();
-              }
-              return closeFilterBox();
-            });
-          }
-          $("<button>", {
-            type: "button"
-          }).text(opts.localeStrings.cancel).appendTo(finalButtons).bind("click", function() {
-            valueList.find(".changed:checked").removeClass("changed").prop("checked", false);
-            valueList.find(".changed:not(:checked)").removeClass("changed").prop("checked", true);
-            return closeFilterBox();
-          });
-          triangleLink = $("<span>").addClass('pvtTriangle').html(" &#x25BE;").bind("click", function(e) {
-            var left, ref2, top;
-            ref2 = $(e.currentTarget).position(), left = ref2.left, top = ref2.top;
-            return valueList.css({
-              left: left + 10,
-              top: top + 10
-            }).show();
-          });
-          attrElem = $("<li>").addClass("axis_" + i).append($("<span>").addClass('pvtAttr').text(attr).data("attrName", attr).append(triangleLink));
-          if (hasExcludedItem) {
-            attrElem.addClass('pvtFilteredAttribute');
-          }
-          return unused.append(attrElem).append(valueList);
+          },
+          value: function() {
+            if (mode === "mean") return this.n === 0 ? 0 / 0 : this.m;
+            if (this.n <= ddof)  return 0;
+            if (mode === "var")   return this.s / (this.n - ddof);
+            if (mode === "stdev") return Math.sqrt(this.s / (this.n - ddof));
+          },
+          format: formatter,
+          numInputs: attr != null ? 0 : 1
         };
-        for (i in shownInDragDrop) {
-          if (!hasProp.call(shownInDragDrop, i)) continue;
-          attr = shownInDragDrop[i];
-          fn1(attr);
-        }
-        tr1 = $("<tr>").appendTo(uiTable);
-        aggregator = $("<select>").addClass('pvtAggregator').bind("change", function() {
-          return refresh();
-        });
-        ref1 = opts.aggregators;
-        for (x in ref1) {
-          if (!hasProp.call(ref1, x)) continue;
-          aggregator.append($("<option>").val(x).html(x));
-        }
-        ordering = {
-          key_a_to_z: {
-            rowSymbol: "&varr;",
-            colSymbol: "&harr;",
-            next: "value_a_to_z"
-          },
-          value_a_to_z: {
-            rowSymbol: "&darr;",
-            colSymbol: "&rarr;",
-            next: "value_z_to_a"
-          },
-          value_z_to_a: {
-            rowSymbol: "&uarr;",
-            colSymbol: "&larr;",
-            next: "key_a_to_z"
-          }
-        };
-        rowOrderArrow = $("<a>", {
-          role: "button"
-        }).addClass("pvtRowOrder").data("order", opts.rowOrder).html(ordering[opts.rowOrder].rowSymbol).bind("click", function() {
-          $(this).data("order", ordering[$(this).data("order")].next);
-          $(this).html(ordering[$(this).data("order")].rowSymbol);
-          return refresh();
-        });
-        colOrderArrow = $("<a>", {
-          role: "button"
-        }).addClass("pvtColOrder").data("order", opts.colOrder).html(ordering[opts.colOrder].colSymbol).bind("click", function() {
-          $(this).data("order", ordering[$(this).data("order")].next);
-          $(this).html(ordering[$(this).data("order")].colSymbol);
-          return refresh();
-        });
-        $("<td>").addClass('pvtVals pvtUiCell').appendTo(tr1).append(aggregator).append(rowOrderArrow).append(colOrderArrow).append($("<br>"));
-        $("<td>").addClass('pvtAxisContainer pvtHorizList pvtCols pvtUiCell').appendTo(tr1);
-        tr2 = $("<tr>").appendTo(uiTable);
-        tr2.append($("<td>").addClass('pvtAxisContainer pvtRows pvtUiCell').attr("valign", "top"));
-        pivotTable = $("<td>").attr("valign", "top").addClass('pvtRendererArea').appendTo(tr2);
-        if (opts.unusedAttrsVertical === true || unusedAttrsVerticalAutoOverride) {
-          uiTable.find('tr:nth-child(1)').prepend(rendererControl);
-          uiTable.find('tr:nth-child(2)').prepend(unused);
-        } else {
-          uiTable.prepend($("<tr>").append(rendererControl).append(unused));
-        }
-        this.html(uiTable);
-        ref2 = opts.cols;
-        for (n = 0, len2 = ref2.length; n < len2; n++) {
-          x = ref2[n];
-          this.find(".pvtCols").append(this.find(".axis_" + ($.inArray(x, shownInDragDrop))));
-        }
-        ref3 = opts.rows;
-        for (o = 0, len3 = ref3.length; o < len3; o++) {
-          x = ref3[o];
-          this.find(".pvtRows").append(this.find(".axis_" + ($.inArray(x, shownInDragDrop))));
-        }
-        if (opts.aggregatorName != null) {
-          this.find(".pvtAggregator").val(opts.aggregatorName);
-        }
-        if (opts.rendererName != null) {
-          this.find(".pvtRenderer").val(opts.rendererName);
-        }
-        if (!opts.showUI) {
-          this.find(".pvtUiCell").hide();
-        }
-        initialRender = true;
-        refreshDelayed = (function(_this) {
-          return function() {
-            var exclusions, inclusions, len4, newDropdown, numInputsToProcess, pivotUIOptions, pvtVals, ref4, ref5, subopts, t, u, unusedAttrsContainer, vals;
-            subopts = {
-              derivedAttributes: opts.derivedAttributes,
-              localeStrings: opts.localeStrings,
-              rendererOptions: opts.rendererOptions,
-              sorters: opts.sorters,
-              cols: [],
-              rows: [],
-              dataClass: opts.dataClass
-            };
-            numInputsToProcess = (ref4 = opts.aggregators[aggregator.val()]([])().numInputs) != null ? ref4 : 0;
-            vals = [];
-            _this.find(".pvtRows li span.pvtAttr").each(function() {
-              return subopts.rows.push($(this).data("attrName"));
-            });
-            _this.find(".pvtCols li span.pvtAttr").each(function() {
-              return subopts.cols.push($(this).data("attrName"));
-            });
-            _this.find(".pvtVals select.pvtAttrDropdown").each(function() {
-              if (numInputsToProcess === 0) {
-                return $(this).remove();
-              } else {
-                numInputsToProcess--;
-                if ($(this).val() !== "") {
-                  return vals.push($(this).val());
-                }
-              }
-            });
-            if (numInputsToProcess !== 0) {
-              pvtVals = _this.find(".pvtVals");
-              for (x = t = 0, ref5 = numInputsToProcess; 0 <= ref5 ? t < ref5 : t > ref5; x = 0 <= ref5 ? ++t : --t) {
-                newDropdown = $("<select>").addClass('pvtAttrDropdown').append($("<option>")).bind("change", function() {
-                  return refresh();
-                });
-                for (u = 0, len4 = shownInAggregators.length; u < len4; u++) {
-                  attr = shownInAggregators[u];
-                  newDropdown.append($("<option>").val(attr).text(attr));
-                }
-                pvtVals.append(newDropdown);
-              }
-            }
-            if (initialRender) {
-              vals = opts.vals;
-              i = 0;
-              _this.find(".pvtVals select.pvtAttrDropdown").each(function() {
-                $(this).val(vals[i]);
-                return i++;
-              });
-              initialRender = false;
-            }
-            subopts.aggregatorName = aggregator.val();
-            subopts.vals = vals;
-            subopts.aggregator = opts.aggregators[aggregator.val()](vals);
-            subopts.renderer = opts.renderers[renderer.val()];
-            subopts.rowOrder = rowOrderArrow.data("order");
-            subopts.colOrder = colOrderArrow.data("order");
-            exclusions = {};
-            _this.find('input.pvtFilter').not(':checked').each(function() {
-              var filter;
-              filter = $(this).data("filter");
-              if (exclusions[filter[0]] != null) {
-                return exclusions[filter[0]].push(filter[1]);
-              } else {
-                return exclusions[filter[0]] = [filter[1]];
-              }
-            });
-            inclusions = {};
-            _this.find('input.pvtFilter:checked').each(function() {
-              var filter;
-              filter = $(this).data("filter");
-              if (exclusions[filter[0]] != null) {
-                if (inclusions[filter[0]] != null) {
-                  return inclusions[filter[0]].push(filter[1]);
-                } else {
-                  return inclusions[filter[0]] = [filter[1]];
-                }
-              }
-            });
-            subopts.filter = function(record) {
-              var excludedItems, k, ref6, ref7;
-              if (!opts.filter(record)) {
-                return false;
-              }
-              for (k in exclusions) {
-                excludedItems = exclusions[k];
-                if (ref6 = "" + ((ref7 = record[k]) != null ? ref7 : 'null'), indexOf.call(excludedItems, ref6) >= 0) {
-                  return false;
-                }
-              }
-              return true;
-            };
-            pivotTable.pivot(materializedInput, subopts);
-            pivotUIOptions = $.extend({}, opts, {
-              cols: subopts.cols,
-              rows: subopts.rows,
-              colOrder: subopts.colOrder,
-              rowOrder: subopts.rowOrder,
-              vals: vals,
-              exclusions: exclusions,
-              inclusions: inclusions,
-              inclusionsInfo: inclusions,
-              aggregatorName: aggregator.val(),
-              rendererName: renderer.val()
-            });
-            _this.data("pivotUIOptions", pivotUIOptions);
-            if (opts.autoSortUnusedAttrs) {
-              unusedAttrsContainer = _this.find("td.pvtUnused.pvtAxisContainer");
-              $(unusedAttrsContainer).children("li").sort(function(a, b) {
-                return naturalSort($(a).text(), $(b).text());
-              }).appendTo(unusedAttrsContainer);
-            }
-            pivotTable.css("opacity", 1);
-            if (opts.onRefresh != null) {
-              return opts.onRefresh(pivotUIOptions);
-            }
-          };
-        })(this);
-        refresh = (function(_this) {
-          return function() {
-            pivotTable.css("opacity", 0.5);
-            return setTimeout(refreshDelayed, 10);
-          };
-        })(this);
-        refresh();
-        this.find(".pvtAxisContainer").sortable({
-          update: function(e, ui) {
-            if (ui.sender == null) {
-              return refresh();
-            }
-          },
-          connectWith: this.find(".pvtAxisContainer"),
-          items: 'li',
-          placeholder: 'pvtPlaceholder'
-        });
-      } catch (error) {
-        e = error;
-        if (typeof console !== "undefined" && console !== null) {
-          console.error(e.stack);
-        }
-        this.html(opts.localeStrings.uiRenderError);
-      }
-      return this;
+      };
     };
+  },
 
-    /*
-    Heatmap post-processing
-     */
-    $.fn.heatmap = function(scope, opts) {
-      var colorScaleGenerator, heatmapper, i, j, l, n, numCols, numRows, ref, ref1, ref2;
-      if (scope == null) {
-        scope = "heatmap";
-      }
-      numRows = this.data("numrows");
-      numCols = this.data("numcols");
-      colorScaleGenerator = opts != null ? (ref = opts.heatmap) != null ? ref.colorScaleGenerator : void 0 : void 0;
-      if (colorScaleGenerator == null) {
-        colorScaleGenerator = function(values) {
-          var max, min;
-          min = Math.min.apply(Math, values);
-          max = Math.max.apply(Math, values);
-          return function(x) {
-            var nonRed;
-            nonRed = 255 - Math.round(255 * (x - min) / (max - min));
-            return "rgb(255," + nonRed + "," + nonRed + ")";
-          };
+  sumOverSum: function(formatter?: any) {
+    if (formatter == null) formatter = usFmt;
+    return function(arg: any) {
+      const [num, denom] = arg;
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          sumNum: 0, sumDenom: 0,
+          push: function(record: any) {
+            if (!isNaN(parseFloat(record[num])))   this.sumNum   += parseFloat(record[num]);
+            if (!isNaN(parseFloat(record[denom]))) this.sumDenom += parseFloat(record[denom]);
+          },
+          value:  function() { return this.sumNum / this.sumDenom; },
+          format: formatter,
+          numInputs: (num != null) && (denom != null) ? 0 : 2
         };
-      }
-      heatmapper = (function(_this) {
-        return function(scope) {
-          var colorScale, forEachCell, values;
-          forEachCell = function(f) {
-            return _this.find(scope).each(function() {
-              var x;
-              x = $(this).data("value");
-              if ((x != null) && isFinite(x)) {
-                return f(x, $(this));
-              }
-            });
-          };
-          values = [];
-          forEachCell(function(x) {
-            return values.push(x);
-          });
-          colorScale = colorScaleGenerator(values);
-          return forEachCell(function(x, elem) {
-            return elem.css("background-color", colorScale(x));
-          });
-        };
-      })(this);
-      switch (scope) {
-        case "heatmap":
-          heatmapper(".pvtVal");
-          break;
-        case "rowheatmap":
-          for (i = l = 0, ref1 = numRows; 0 <= ref1 ? l < ref1 : l > ref1; i = 0 <= ref1 ? ++l : --l) {
-            heatmapper(".pvtVal.row" + i);
-          }
-          break;
-        case "colheatmap":
-          for (j = n = 0, ref2 = numCols; 0 <= ref2 ? n < ref2 : n > ref2; j = 0 <= ref2 ? ++n : --n) {
-            heatmapper(".pvtVal.col" + j);
-          }
-      }
-      heatmapper(".pvtTotal.rowTotal");
-      heatmapper(".pvtTotal.colTotal");
-      return this;
+      };
     };
+  },
 
-    /*
-    Barchart post-processing
-     */
-    return $.fn.barchart = function(opts) {
-      var barcharter, i, l, numCols, numRows, ref;
-      numRows = this.data("numrows");
-      numCols = this.data("numcols");
-      barcharter = (function(_this) {
-        return function(scope) {
-          var forEachCell, max, min, range, scaler, values;
-          forEachCell = function(f) {
-            return _this.find(scope).each(function() {
-              var x;
-              x = $(this).data("value");
-              if ((x != null) && isFinite(x)) {
-                return f(x, $(this));
-              }
-            });
-          };
-          values = [];
-          forEachCell(function(x) {
-            return values.push(x);
-          });
-          max = Math.max.apply(Math, values);
-          if (max < 0) {
-            max = 0;
-          }
-          range = max;
-          min = Math.min.apply(Math, values);
-          if (min < 0) {
-            range = max - min;
-          }
-          scaler = function(x) {
-            return 100 * x / (1.4 * range);
-          };
-          return forEachCell(function(x, elem) {
-            var bBase, bgColor, text, wrapper;
-            text = elem.text();
-            wrapper = $("<div>").css({
-              "position": "relative",
-              "height": "55px"
-            });
-            bgColor = "gray";
-            bBase = 0;
-            if (min < 0) {
-              bBase = scaler(-min);
-            }
-            if (x < 0) {
-              bBase += scaler(x);
-              bgColor = "darkred";
-              x = -x;
-            }
-            wrapper.append($("<div>").css({
-              "position": "absolute",
-              "bottom": bBase + "%",
-              "left": 0,
-              "right": 0,
-              "height": scaler(x) + "%",
-              "background-color": bgColor
-            }));
-            wrapper.append($("<div>").text(text).css({
-              "position": "relative",
-              "padding-left": "5px",
-              "padding-right": "5px"
-            }));
-            return elem.css({
-              "padding": 0,
-              "padding-top": "5px",
-              "text-align": "center"
-            }).html(wrapper);
-          });
+  sumOverSumBound80: function(upper: boolean = true, formatter?: any) {
+    if (formatter == null) formatter = usFmt;
+    return function(arg: any) {
+      const [num, denom] = arg;
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          sumNum: 0, sumDenom: 0,
+          push: function(record: any) {
+            if (!isNaN(parseFloat(record[num])))   this.sumNum   += parseFloat(record[num]);
+            if (!isNaN(parseFloat(record[denom]))) this.sumDenom += parseFloat(record[denom]);
+          },
+          value: function() {
+            const sign = upper ? 1 : -1;
+            return (0.821187207574908 / this.sumDenom + this.sumNum / this.sumDenom +
+              1.2815515655446004 * sign * Math.sqrt(
+                0.410593603787454 / (this.sumDenom * this.sumDenom) +
+                (this.sumNum * (1 - this.sumNum / this.sumDenom)) / (this.sumDenom * this.sumDenom)
+              )) / (1 + 1.642374415149816 / this.sumDenom);
+          },
+          format: formatter,
+          numInputs: (num != null) && (denom != null) ? 0 : 2
         };
-      })(this);
-      for (i = l = 0, ref = numRows; 0 <= ref ? l < ref : l > ref; i = 0 <= ref ? ++l : --l) {
-        barcharter(".pvtVal.row" + i);
-      }
-      barcharter(".pvtTotal.colTotal");
-      return this;
+      };
     };
+  },
+
+  fractionOf: function(wrapped: any, type: string = "total", formatter?: any) {
+    if (formatter == null) formatter = usFmtPct;
+    // rest params replaces the old `slice.call(arguments, 0)` pattern
+    return function(...x: any[]) {
+      return function(data: any, rowKey: any, colKey: any) {
+        return {
+          selector: ({ total: [[], []], row: [rowKey, []], col: [[], colKey] } as any)[type],
+          inner:    wrapped.apply(null, x)(data, rowKey, colKey),
+          push:     function(record: any) { return this.inner.push(record); },
+          format:   formatter,
+          value:    function() {
+            return this.inner.value() / data.getAggregator.apply(data, this.selector).inner.value();
+          },
+          numInputs: wrapped.apply(null, x)().numInputs
+        };
+      };
+    };
+  }
+};
+
+aggregatorTemplates.countUnique = (f?: any) =>
+  aggregatorTemplates.uniques((x: any[]) => x.length, f);
+
+aggregatorTemplates.listUnique = (s: string) =>
+  aggregatorTemplates.uniques((x: any[]) => x.sort(naturalSort).join(s), (x: any) => x);
+
+aggregatorTemplates.max   = (f?: any) => aggregatorTemplates.extremes("max",   f);
+aggregatorTemplates.min   = (f?: any) => aggregatorTemplates.extremes("min",   f);
+aggregatorTemplates.first = (f?: any) => aggregatorTemplates.extremes("first", f);
+aggregatorTemplates.last  = (f?: any) => aggregatorTemplates.extremes("last",  f);
+aggregatorTemplates.median  = (f?: any) => aggregatorTemplates.quantile(0.5, f);
+aggregatorTemplates.average = (f?: any) => aggregatorTemplates.runningStat("mean",  1, f);
+aggregatorTemplates["var"]  = (ddof?: any, f?: any) => aggregatorTemplates.runningStat("var",   ddof, f);
+aggregatorTemplates.stdev   = (ddof?: any, f?: any) => aggregatorTemplates.runningStat("stdev", ddof, f);
+
+export const aggregators: Record<string, any> = (function(tpl) {
+  return {
+    "Count":                        tpl.count(usFmtInt),
+    "Count Unique Values":          tpl.countUnique(usFmtInt),
+    "List Unique Values":           tpl.listUnique(", "),
+    "Sum":                          tpl.sum(usFmt),
+    "Integer Sum":                  tpl.sum(usFmtInt),
+    "Average":                      tpl.average(usFmt),
+    "Median":                       tpl.median(usFmt),
+    "Sample Variance":              tpl["var"](1, usFmt),
+    "Sample Standard Deviation":    tpl.stdev(1, usFmt),
+    "Minimum":                      tpl.min(usFmt),
+    "Maximum":                      tpl.max(usFmt),
+    "First":                        tpl.first(usFmt),
+    "Last":                         tpl.last(usFmt),
+    "Sum over Sum":                 tpl.sumOverSum(usFmt),
+    "80% Upper Bound":              tpl.sumOverSumBound80(true,  usFmt),
+    "80% Lower Bound":              tpl.sumOverSumBound80(false, usFmt),
+    "Sum as Fraction of Total":     tpl.fractionOf(tpl.sum(),   "total", usFmtPct),
+    "Sum as Fraction of Rows":      tpl.fractionOf(tpl.sum(),   "row",   usFmtPct),
+    "Sum as Fraction of Columns":   tpl.fractionOf(tpl.sum(),   "col",   usFmtPct),
+    "Count as Fraction of Total":   tpl.fractionOf(tpl.count(), "total", usFmtPct),
+    "Count as Fraction of Rows":    tpl.fractionOf(tpl.count(), "row",   usFmtPct),
+    "Count as Fraction of Columns": tpl.fractionOf(tpl.count(), "col",   usFmtPct),
+  };
+})(aggregatorTemplates);
+
+// ─── Date utilities and derivers ──────────────────────────────────────────
+
+const mthNamesEn = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const dayNamesEn = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+function zeroPad(number: number): string {
+  return ("0" + number).substr(-2, 2);
+}
+
+export const derivers: Record<string, any> = {
+  bin: function(col: string, binWidth: number) {
+    return function(record: any) { return record[col] - record[col] % binWidth; };
+  },
+  dateFormat: function(
+    col: string,
+    formatString: string,
+    utcOutput: boolean = false,
+    mthNames: string[] = mthNamesEn,
+    dayNames: string[] = dayNamesEn
+  ) {
+    const utc = utcOutput ? "UTC" : "";
+    return function(record: any) {
+      const date = new Date(Date.parse(record[col]));
+      if (isNaN(date as any)) return "";
+      return formatString.replace(/%(.)/g, function(_m: string, p: string) {
+        switch (p) {
+          case "y": return date["get" + utc + "FullYear"]();
+          case "m": return zeroPad(date["get" + utc + "Month"]() + 1);
+          case "n": return mthNames[date["get" + utc + "Month"]()];
+          case "d": return zeroPad(date["get" + utc + "Date"]());
+          case "w": return dayNames[date["get" + utc + "Day"]()];
+          case "x": return date["get" + utc + "Day"]();
+          case "H": return zeroPad(date["get" + utc + "Hours"]());
+          case "M": return zeroPad(date["get" + utc + "Minutes"]());
+          case "S": return zeroPad(date["get" + utc + "Seconds"]());
+          default:  return "%" + p;
+        }
+      });
+    };
+  }
+};
+
+// ─── Locale ───────────────────────────────────────────────────────────────
+// renderers are populated by src/adapters/jquery.ts; the plain "Table"
+// renderer is added below after pivotTableRenderer is defined.
+
+export const locales: Record<string, any> = {
+  en: {
+    aggregators,
+    renderers: {} as Record<string, any>,   // filled in at bottom of this file
+    localeStrings: {
+      renderError:   "An error occurred rendering the PivotTable results.",
+      computeError:  "An error occurred computing the PivotTable results.",
+      uiRenderError: "An error occurred rendering the PivotTable UI.",
+      selectAll:     "Select All",
+      selectNone:    "Select None",
+      tooMany:       "(too many to list)",
+      filterResults: "Filter values",
+      apply:         "Apply",
+      cancel:        "Cancel",
+      totals:        "Totals",
+      vs:            "vs",
+      by:            "by"
+    }
+  }
+};
+
+// ─── PivotData ────────────────────────────────────────────────────────────
+
+export const PivotData: any = (function() {
+
+  function PivotData(this: any, input: any, opts: PivotDataOptions) {
+    if (opts == null) opts = {};
+
+    // Bind methods so they can be passed as callbacks without losing `this`
+    this.getAggregator = this.getAggregator.bind(this);
+    this.getRowKeys    = this.getRowKeys.bind(this);
+    this.getColKeys    = this.getColKeys.bind(this);
+    this.sortKeys      = this.sortKeys.bind(this);
+    this.arrSort       = this.arrSort.bind(this);
+
+    this.input              = input;
+    this.aggregator         = opts.aggregator         != null ? opts.aggregator         : aggregatorTemplates.count()();
+    this.aggregatorName     = opts.aggregatorName     != null ? opts.aggregatorName     : "Count";
+    this.colAttrs           = opts.cols               != null ? opts.cols               : [];
+    this.rowAttrs           = opts.rows               != null ? opts.rows               : [];
+    this.valAttrs           = opts.vals               != null ? opts.vals               : [];
+    this.sorters            = opts.sorters            != null ? opts.sorters            : {};
+    this.rowOrder           = opts.rowOrder           != null ? opts.rowOrder           : "key_a_to_z";
+    this.colOrder           = opts.colOrder           != null ? opts.colOrder           : "key_a_to_z";
+    this.derivedAttributes  = opts.derivedAttributes  != null ? opts.derivedAttributes  : {};
+    this.filter             = opts.filter             != null ? opts.filter             : function() { return true; };
+
+    this.tree      = {};
+    this.rowKeys   = [];
+    this.colKeys   = [];
+    this.rowTotals = {};
+    this.colTotals = {};
+    this.allTotal  = this.aggregator(this, [], []);
+    this.sorted    = false;
+
+    if (!opts.lazy) {
+      // Fast path: columnar input with no derived attrs or custom filter
+      if (input.columnFormat && Object.keys(this.derivedAttributes).length === 0 && !opts.filter) {
+        const len = input.columns[input.columnNames[0]].length;
+        for (let i = 0; i < len; i++) {
+          this.processRecord(i, input);
+        }
+      } else {
+        PivotData.forEachRecord(this.input, this.derivedAttributes, (record: any) => {
+          if (this.filter(record)) this.processRecord(record);
+        });
+      }
+    }
+  }
+
+  PivotData.forEachRecord = function(input: any, derivedAttributes: any, f: any) {
+    // Fast path: no derived attributes — skip wrapper entirely
+    let addRecord: any;
+    if (Object.keys(derivedAttributes).length === 0) {
+      addRecord = f;
+    } else {
+      addRecord = function(record: any) {
+        for (const attr in derivedAttributes) {
+          const deriver  = derivedAttributes[attr];
+          const derived  = deriver(record);
+          record[attr]   = derived != null ? derived : record[attr];
+        }
+        f(record);
+      };
+    }
+
+    // 1. Function — caller drives iteration
+    if (typeof input === "function") {
+      input(addRecord);
+
+    // 2. Columnar TypedArrays — decode on the fly, reuse one record object
+    } else if (input.columnFormat) {
+      const len    = input.columns[input.columnNames[0]].length;
+      const record: any = {};
+      for (let i = 0; i < len; i++) {
+        for (const name of input.columnNames) {
+          const col  = input.columns[name];
+          const dict = input.dicts != null ? input.dicts[name] : void 0;
+          record[name] = dict ? dict[col[i]] : col[i];
+        }
+        addRecord(record);
+      }
+
+    // 3. Array of arrays — first row is headers
+    } else if (Array.isArray(input) && Array.isArray(input[0])) {
+      const headers = input[0];
+      for (let i = 1; i < input.length; i++) {
+        const row    = input[i];
+        const record: any = {};
+        for (let j = 0; j < headers.length; j++) {
+          record[headers[j]] = row[j];
+        }
+        addRecord(record);
+      }
+
+    // 4. Array of objects — simplest case
+    } else if (Array.isArray(input)) {
+      for (const record of input) {
+        addRecord(record);
+      }
+
+    // 5. HTML table — headers from thead th, rows from tbody tr
+    } else if (input instanceof HTMLElement) {
+      const headers = Array.prototype.slice
+        .call(input.querySelectorAll("thead > tr > th"))
+        .map((th: any) => th.textContent);
+      input.querySelectorAll("tbody > tr").forEach((tr: any) => {
+        const record: any = {};
+        tr.querySelectorAll("td").forEach((td: any, j: number) => {
+          record[headers[j]] = td.textContent;
+        });
+        addRecord(record);
+      });
+
+    } else {
+      throw new Error("unknown input format");
+    }
+  };
+
+  PivotData.prototype.forEachMatchingRecord = function(criteria: any, callback: any) {
+    return PivotData.forEachRecord(this.input, this.derivedAttributes, (record: any) => {
+      if (!this.filter(record)) return;
+      for (const k in criteria) {
+        const v = criteria[k];
+        if (v !== (record[k] != null ? record[k] : "null")) return;
+      }
+      callback(record);
+    });
+  };
+
+  PivotData.prototype.arrSort = function(attrs: string[]) {
+    // Build a per-attribute sorter array, then compare element-by-element
+    const sortersArr = attrs.map((a: string) => getSort(this.sorters, a));
+    return function(a: any[], b: any[]) {
+      for (let i = 0; i < sortersArr.length; i++) {
+        const comparison = sortersArr[i](a[i], b[i]);
+        if (comparison !== 0) return comparison;
+      }
+      return 0;
+    };
+  };
+
+  PivotData.prototype.sortKeys = function() {
+    if (!this.sorted) {
+      this.sorted = true;
+      const v = (r: any, c: any) => this.getAggregator(r, c).value();
+      switch (this.rowOrder) {
+        case "value_a_to_z":
+          this.rowKeys.sort((a: any, b: any) =>  naturalSort(v(a, []), v(b, [])));
+          break;
+        case "value_z_to_a":
+          this.rowKeys.sort((a: any, b: any) => -naturalSort(v(a, []), v(b, [])));
+          break;
+        default:
+          this.rowKeys.sort(this.arrSort(this.rowAttrs));
+      }
+      switch (this.colOrder) {
+        case "value_a_to_z":
+          this.colKeys.sort((a: any, b: any) =>  naturalSort(v([], a), v([], b)));
+          break;
+        case "value_z_to_a":
+          this.colKeys.sort((a: any, b: any) => -naturalSort(v([], a), v([], b)));
+          break;
+        default:
+          this.colKeys.sort(this.arrSort(this.colAttrs));
+      }
+    }
+  };
+
+  PivotData.prototype.getColKeys = function() {
+    this.sortKeys();
+    return this.colKeys;
+  };
+
+  PivotData.prototype.getRowKeys = function() {
+    this.sortKeys();
+    return this.rowKeys;
+  };
+
+  PivotData.prototype.processRecord = function(recordOrIndex: any, columnarInput?: ColumnarInput) {
+    const NULL_STR = String.fromCharCode(0);
+
+    // Read a single value from a columnar column at row i, decoding dict if present
+    function readColumnarValue(col: any, dict: any[] | undefined, i: number) {
+      if (col == null) return "null";
+      return dict ? dict[col[i]] : col[i];
+    }
+
+    const colKey: any[] = [];
+    const rowKey: any[] = [];
+    let record: any;
+
+    if (columnarInput != null) {
+      // Columnar path: recordOrIndex is an integer row index
+      const i = recordOrIndex;
+      for (const attr of this.colAttrs) {
+        colKey.push(readColumnarValue(columnarInput.columns[attr], columnarInput.dicts?.[attr], i));
+      }
+      for (const attr of this.rowAttrs) {
+        rowKey.push(readColumnarValue(columnarInput.columns[attr], columnarInput.dicts?.[attr], i));
+      }
+      record = {};
+      for (const attr of this.valAttrs) {
+        record[attr] = readColumnarValue(columnarInput.columns[attr], columnarInput.dicts?.[attr], i);
+      }
+    } else {
+      // Row-oriented path: recordOrIndex is a plain object
+      record = recordOrIndex;
+      for (const attr of this.colAttrs) colKey.push(record[attr] != null ? record[attr] : "null");
+      for (const attr of this.rowAttrs) rowKey.push(record[attr] != null ? record[attr] : "null");
+    }
+
+    // Null char separator — safe because it never appears in real field values
+    const flatRowKey = rowKey.join(NULL_STR);
+    const flatColKey = colKey.join(NULL_STR);
+
+    // Push into four aggregator buckets
+    this.allTotal.push(record);
+
+    if (rowKey.length !== 0) {
+      if (!this.rowTotals[flatRowKey]) {
+        this.rowKeys.push(rowKey);
+        this.rowTotals[flatRowKey] = this.aggregator(this, rowKey, []);
+      }
+      this.rowTotals[flatRowKey].push(record);
+    }
+
+    if (colKey.length !== 0) {
+      if (!this.colTotals[flatColKey]) {
+        this.colKeys.push(colKey);
+        this.colTotals[flatColKey] = this.aggregator(this, [], colKey);
+      }
+      this.colTotals[flatColKey].push(record);
+    }
+
+    if (rowKey.length !== 0 && colKey.length !== 0) {
+      if (!this.tree[flatRowKey]) this.tree[flatRowKey] = {};
+      if (!this.tree[flatRowKey][flatColKey]) {
+        this.tree[flatRowKey][flatColKey] = this.aggregator(this, rowKey, colKey);
+      }
+      this.tree[flatRowKey][flatColKey].push(record);
+    }
+  };
+
+  PivotData.prototype.pushRecord = function(record: any) {
+    if (this.filter(record)) {
+      this.sorted = false;
+      this.processRecord(record);
+    }
+  };
+
+  PivotData.prototype.pushChunk = function(columnarInput: ColumnarInput, startIdx: number, endIdx: number) {
+    this.sorted = false;
+    for (let i = startIdx; i < endIdx; i++) {
+      this.processRecord(i, columnarInput);
+    }
+  };
+
+  PivotData.prototype.getAggregator = function(rowKey: any[], colKey: any[]): AggregatorInstance {
+    const flatRowKey = rowKey.join(String.fromCharCode(0));
+    const flatColKey = colKey.join(String.fromCharCode(0));
+    let agg: AggregatorInstance | undefined;
+    if (rowKey.length === 0 && colKey.length === 0) {
+      agg = this.allTotal;
+    } else if (rowKey.length === 0) {
+      agg = this.colTotals[flatColKey];
+    } else if (colKey.length === 0) {
+      agg = this.rowTotals[flatRowKey];
+    } else {
+      agg = this.tree[flatRowKey]?.[flatColKey];
+    }
+    // Fallback stub for cells that have no data — satisfies AggregatorInstance
+    return agg != null ? agg : { push: () => {}, value: () => null, format: () => "" };
+  };
+
+  return PivotData;
 
 })();
+
+// ─── PivotStream ──────────────────────────────────────────────────────────
+// Builds columnar TypedArrays from a streaming source.
+// Strings are dictionary-encoded on the fly; numbers stored as Float64.
+// Call stream.toColumnar() inside onComplete to get a columnarInput
+// ready to pass straight into new PivotData(...).
+
+export const PivotStream: any = (function() {
+
+  function PivotStream(this: any, opts?: any) {
+    if (opts == null) opts = {};
+    this.onComplete   = opts.onComplete != null ? opts.onComplete : function() {};
+    this._count       = 0;
+    this._colsInit    = false;
+    this._stringCols  = [] as string[];
+    this._numericCols = [] as string[];
+    this._dicts       = {} as Record<string, string[]>;
+    this._dictIndex   = {} as Record<string, Map<string, number>>;
+    this._arrays      = {} as Record<string, any[]>;
+  }
+
+  // Detect column types from the first record and initialise storage
+  PivotStream.prototype._initCols = function(record: any) {
+    for (const col of Object.keys(record)) {
+      const val = record[col];
+      if (typeof val === "number") {
+        this._numericCols.push(col);
+        this._arrays[col] = [];
+      } else {
+        this._stringCols.push(col);
+        this._dicts[col]     = [];
+        this._dictIndex[col] = new Map();
+        this._arrays[col]    = [];
+      }
+    }
+    this._colsInit = true;
+  };
+
+  // O(1) dictionary encoding via Map
+  PivotStream.prototype._enc = function(col: string, val: any): number {
+    const str = val != null ? String(val) : "null";
+    if (!this._dictIndex[col].has(str)) {
+      this._dictIndex[col].set(str, this._dicts[col].length);
+      this._dicts[col].push(str);
+    }
+    return this._dictIndex[col].get(str)!;
+  };
+
+  // Push one record — values immediately encoded, no JS object retained
+  PivotStream.prototype.push = function(record: any) {
+    if (!this._colsInit) this._initCols(record);
+    for (const col of this._stringCols)  this._arrays[col].push(this._enc(col, record[col]));
+    for (const col of this._numericCols) this._arrays[col].push(Number(record[col]) || 0);
+    this._count++;
+  };
+
+  // Convert accumulated arrays → columnarInput ready for PivotData
+  PivotStream.prototype.toColumnar = function(): ColumnarInput {
+    const columns:     Record<string, any>    = {};
+    const columnNames: string[]               = [];
+    const dicts:       Record<string, string[]> = {};
+    const allCols = this._stringCols.concat(this._numericCols);
+    for (const col of allCols) {
+      columnNames.push(col);
+      if (this._stringCols.indexOf(col) !== -1) {
+        columns[col] = new Uint16Array(this._arrays[col]);
+        dicts[col]   = this._dicts[col];
+      } else {
+        columns[col] = new Float64Array(this._arrays[col]);
+      }
+    }
+    return { columnFormat: true, columnNames, columns, dicts };
+  };
+
+  // Signal end of stream — fires onComplete(null, totalCount, stream)
+  PivotStream.prototype.done = function() {
+    return this.onComplete(null, this._count, this);
+  };
+
+  // Consume a fetch() response as NDJSON (one JSON object per line)
+  PivotStream.prototype.fromFetch = function(url: string, fetchOpts?: any): Promise<void> {
+    const self = this;
+    return fetch(url, fetchOpts != null ? fetchOpts : {}).then(function(res) {
+      if (!res.ok) throw new Error("PivotStream fetch failed: " + res.status + " " + res.statusText);
+      const reader  = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      function pump(): Promise<void> {
+        return reader.read().then(function({ done, value }) {
+          if (done) {
+            buffer.split("\n").forEach(line => {
+              if (line.trim().length > 0) {
+                try { self.push(JSON.parse(line)); } catch(e) {}
+              }
+            });
+            self.done();
+            return;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop()!;
+          lines.forEach(line => {
+            if (line.trim().length > 0) self.push(JSON.parse(line));
+          });
+          return pump();
+        });
+      }
+      return pump();
+    });
+  };
+
+  return PivotStream;
+
+})();
+
+// ─── Default table renderer ───────────────────────────────────────────────
+
+export function pivotTableRenderer(pivotData: any, opts?: any): HTMLTableElement {
+  const table         = Object.assign({ clickCallback: null, rowTotals: true, colTotals: true }, opts && opts.table);
+  const localeStrings = Object.assign({ totals: "Totals" }, opts && opts.localeStrings);
+
+  const colAttrs = pivotData.colAttrs;
+  const rowAttrs = pivotData.rowAttrs;
+  const rowKeys  = pivotData.getRowKeys();
+  const colKeys  = pivotData.getColKeys();
+
+  // Returns span size for a merged header cell; -1 means "skip, covered by span above"
+  function spanSize(arr: any[][], i: number, j: number): number {
+    if (i !== 0) {
+      let noDraw = true;
+      for (let x = 0; x <= j; x++) {
+        if (arr[i - 1][x] !== arr[i][x]) { noDraw = false; break; }
+      }
+      if (noDraw) return -1;
+    }
+    let len = 0;
+    while (i + len < arr.length) {
+      let stop = false;
+      for (let x = 0; x <= j; x++) {
+        if (arr[i][x] !== arr[i + len][x]) { stop = true; break; }
+      }
+      if (stop) break;
+      len++;
+    }
+    return len;
+  }
+
+  const getClickHandler = table.clickCallback
+    ? function(value: any, rowValues: any[], colValues: any[]) {
+        const filters: Record<string, any> = {};
+        colAttrs.forEach((attr: string, i: number) => { if (colValues[i] != null) filters[attr] = colValues[i]; });
+        rowAttrs.forEach((attr: string, i: number) => { if (rowValues[i] != null) filters[attr] = rowValues[i]; });
+        return (e: Event) => table.clickCallback(e, value, filters, pivotData);
+      }
+    : null;
+
+  const result = document.createElement("table");
+  result.className = "pvtTable";
+
+  // ── thead ──────────────────────────────────────────────────────────────
+  const thead = document.createElement("thead");
+
+  colAttrs.forEach((c: string, j: number) => {
+    const tr = document.createElement("tr");
+
+    if (j === 0 && rowAttrs.length !== 0) {
+      const th = document.createElement("th");
+      th.setAttribute("colspan", String(rowAttrs.length));
+      th.setAttribute("rowspan", String(colAttrs.length));
+      tr.appendChild(th);
+    }
+
+    const axisLabel = document.createElement("th");
+    axisLabel.className   = "pvtAxisLabel";
+    axisLabel.textContent = c;
+    tr.appendChild(axisLabel);
+
+    colKeys.forEach((colKey: any[], i: number) => {
+      const span = spanSize(colKeys, i, j);
+      if (span !== -1) {
+        const th = document.createElement("th");
+        th.className   = "pvtColLabel";
+        th.textContent = colKey[j];
+        th.setAttribute("colspan", String(span));
+        if (j === colAttrs.length - 1 && rowAttrs.length !== 0) {
+          th.setAttribute("rowspan", "2");
+        }
+        tr.appendChild(th);
+      }
+    });
+
+    if (j === 0 && table.rowTotals) {
+      const th = document.createElement("th");
+      th.className = "pvtTotalLabel pvtRowTotalLabel";
+      th.innerHTML = localeStrings.totals;
+      th.setAttribute("rowspan", String(colAttrs.length + (rowAttrs.length === 0 ? 0 : 1)));
+      tr.appendChild(th);
+    }
+
+    thead.appendChild(tr);
+  });
+
+  if (rowAttrs.length !== 0) {
+    const tr = document.createElement("tr");
+    rowAttrs.forEach((r: string) => {
+      const th = document.createElement("th");
+      th.className   = "pvtAxisLabel";
+      th.textContent = r;
+      tr.appendChild(th);
+    });
+    const th = document.createElement("th");
+    if (colAttrs.length === 0) {
+      th.className = "pvtTotalLabel pvtRowTotalLabel";
+      th.innerHTML = localeStrings.totals;
+    }
+    tr.appendChild(th);
+    thead.appendChild(tr);
+  }
+
+  result.appendChild(thead);
+
+  // ── tbody ──────────────────────────────────────────────────────────────
+  const tbody = document.createElement("tbody");
+
+  rowKeys.forEach((rowKey: any[], i: number) => {
+    const tr = document.createElement("tr");
+
+    rowKey.forEach((txt: any, j: number) => {
+      const span = spanSize(rowKeys, i, j);
+      if (span !== -1) {
+        const th = document.createElement("th");
+        th.className   = "pvtRowLabel";
+        th.textContent = txt;
+        th.setAttribute("rowspan", String(span));
+        if (j === rowAttrs.length - 1 && colAttrs.length !== 0) {
+          th.setAttribute("colspan", "2");
+        }
+        tr.appendChild(th);
+      }
+    });
+
+    colKeys.forEach((colKey: any[], j: number) => {
+      const aggregator: AggregatorInstance = pivotData.getAggregator(rowKey, colKey);
+      const val = aggregator.value();
+      const td  = document.createElement("td");
+      td.className   = "pvtVal row" + i + " col" + j;
+      td.textContent = aggregator.format(val);
+      td.setAttribute("data-value", val == null ? "" : String(val));
+      if (getClickHandler) td.onclick = getClickHandler(val, rowKey, colKey);
+      tr.appendChild(td);
+    });
+
+    if (table.rowTotals || colAttrs.length === 0) {
+      const agg = pivotData.getAggregator(rowKey, []);
+      const val = agg.value();
+      const td  = document.createElement("td");
+      td.className   = "pvtTotal rowTotal";
+      td.textContent = agg.format(val);
+      td.setAttribute("data-value", val == null ? "" : String(val));
+      td.setAttribute("data-for", "row" + i);
+      if (getClickHandler) td.onclick = getClickHandler(val, rowKey, []);
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  });
+
+  if (table.colTotals || rowAttrs.length === 0) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.className = "pvtTotalLabel pvtColTotalLabel";
+    th.innerHTML = localeStrings.totals;
+    th.setAttribute("colspan", String(rowAttrs.length + (colAttrs.length === 0 ? 0 : 1)));
+    tr.appendChild(th);
+
+    colKeys.forEach((colKey: any[], j: number) => {
+      const agg = pivotData.getAggregator([], colKey);
+      const val = agg.value();
+      const td  = document.createElement("td");
+      td.className   = "pvtTotal colTotal";
+      td.textContent = agg.format(val);
+      td.setAttribute("data-value", val == null ? "" : String(val));
+      td.setAttribute("data-for", "col" + j);
+      if (getClickHandler) td.onclick = getClickHandler(val, [], colKey);
+      tr.appendChild(td);
+    });
+
+    if (table.rowTotals || colAttrs.length === 0) {
+      const agg = pivotData.getAggregator([], []);
+      const val = agg.value();
+      const td  = document.createElement("td");
+      td.className   = "pvtGrandTotal";
+      td.textContent = agg.format(val);
+      td.setAttribute("data-value", val == null ? "" : String(val));
+      if (getClickHandler) td.onclick = getClickHandler(val, [], []);
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  }
+
+  result.appendChild(tbody);
+  result.setAttribute("data-numrows", String(rowKeys.length));
+  result.setAttribute("data-numcols", String(colKeys.length));
+  return result;
+}
+
+// ─── Renderers (plain, no jQuery) ────────────────────────────────────────
+// The jQuery adapter adds "Table Barchart", "Heatmap" etc.
+
+export const renderers: Record<string, any> = {
+  "Table": pivotTableRenderer
+};
+
+// Wire "Table" into locales so the locale object is self-contained for plain usage
+locales.en.renderers = renderers;
