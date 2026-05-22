@@ -441,27 +441,20 @@ var locales = {
     }
   }
 };
-var PivotData = (function() {
-  function PivotData2(input, opts) {
-    if (opts == null) opts = {};
-    this.getAggregator = this.getAggregator.bind(this);
-    this.getRowKeys = this.getRowKeys.bind(this);
-    this.getColKeys = this.getColKeys.bind(this);
-    this.sortKeys = this.sortKeys.bind(this);
-    this.arrSort = this.arrSort.bind(this);
+var PivotData = class _PivotData {
+  constructor(input, opts = {}) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     this.input = input;
-    this.aggregator = opts.aggregator != null ? opts.aggregator : aggregatorTemplates.count()();
-    this.aggregatorName = opts.aggregatorName != null ? opts.aggregatorName : "Count";
-    this.colAttrs = opts.cols != null ? opts.cols : [];
-    this.rowAttrs = opts.rows != null ? opts.rows : [];
-    this.valAttrs = opts.vals != null ? opts.vals : [];
-    this.sorters = opts.sorters != null ? opts.sorters : {};
-    this.rowOrder = opts.rowOrder != null ? opts.rowOrder : "key_a_to_z";
-    this.colOrder = opts.colOrder != null ? opts.colOrder : "key_a_to_z";
-    this.derivedAttributes = opts.derivedAttributes != null ? opts.derivedAttributes : {};
-    this.filter = opts.filter != null ? opts.filter : function() {
-      return true;
-    };
+    this.aggregator = (_a = opts.aggregator) != null ? _a : aggregatorTemplates.count()();
+    this.aggregatorName = (_b = opts.aggregatorName) != null ? _b : "Count";
+    this.colAttrs = (_c = opts.cols) != null ? _c : [];
+    this.rowAttrs = (_d = opts.rows) != null ? _d : [];
+    this.valAttrs = (_e = opts.vals) != null ? _e : [];
+    this.sorters = (_f = opts.sorters) != null ? _f : {};
+    this.rowOrder = (_g = opts.rowOrder) != null ? _g : "key_a_to_z";
+    this.colOrder = (_h = opts.colOrder) != null ? _h : "key_a_to_z";
+    this.derivedAttributes = (_i = opts.derivedAttributes) != null ? _i : {};
+    this.filter = (_j = opts.filter) != null ? _j : (() => true);
     this.tree = {};
     this.rowKeys = [];
     this.colKeys = [];
@@ -476,21 +469,21 @@ var PivotData = (function() {
           this.processRecord(i, input);
         }
       } else {
-        PivotData2.forEachRecord(this.input, this.derivedAttributes, (record) => {
+        _PivotData.forEachRecord(this.input, this.derivedAttributes, (record) => {
           if (this.filter(record)) this.processRecord(record);
         });
       }
     }
   }
-  PivotData2.forEachRecord = function(input, derivedAttributes, f) {
+  // ── Static ────────────────────────────────────────────────────────────────
+  static forEachRecord(input, derivedAttributes, f) {
     let addRecord;
     if (Object.keys(derivedAttributes).length === 0) {
       addRecord = f;
     } else {
       addRecord = function(record) {
         for (const attr in derivedAttributes) {
-          const deriver = derivedAttributes[attr];
-          const derived = deriver(record);
+          const derived = derivedAttributes[attr](record);
           record[attr] = derived != null ? derived : record[attr];
         }
         f(record);
@@ -535,18 +528,18 @@ var PivotData = (function() {
     } else {
       throw new Error("unknown input format");
     }
-  };
-  PivotData2.prototype.forEachMatchingRecord = function(criteria, callback) {
-    return PivotData2.forEachRecord(this.input, this.derivedAttributes, (record) => {
+  }
+  // ── Instance methods ──────────────────────────────────────────────────────
+  forEachMatchingRecord(criteria, callback) {
+    _PivotData.forEachRecord(this.input, this.derivedAttributes, (record) => {
       if (!this.filter(record)) return;
       for (const k in criteria) {
-        const v = criteria[k];
-        if (v !== (record[k] != null ? record[k] : "null")) return;
+        if (criteria[k] !== (record[k] != null ? record[k] : "null")) return;
       }
       callback(record);
     });
-  };
-  PivotData2.prototype.arrSort = function(attrs) {
+  }
+  arrSort(attrs) {
     const sortersArr = attrs.map((a) => getSort(this.sorters, a));
     return function(a, b) {
       for (let i = 0; i < sortersArr.length; i++) {
@@ -555,8 +548,8 @@ var PivotData = (function() {
       }
       return 0;
     };
-  };
-  PivotData2.prototype.sortKeys = function() {
+  }
+  sortKeys() {
     if (!this.sorted) {
       this.sorted = true;
       const v = (r, c) => this.getAggregator(r, c).value();
@@ -581,16 +574,16 @@ var PivotData = (function() {
           this.colKeys.sort(this.arrSort(this.colAttrs));
       }
     }
-  };
-  PivotData2.prototype.getColKeys = function() {
+  }
+  getColKeys() {
     this.sortKeys();
     return this.colKeys;
-  };
-  PivotData2.prototype.getRowKeys = function() {
+  }
+  getRowKeys() {
     this.sortKeys();
     return this.rowKeys;
-  };
-  PivotData2.prototype.processRecord = function(recordOrIndex, columnarInput) {
+  }
+  processRecord(recordOrIndex, columnarInput) {
     var _a, _b, _c;
     const NULL_STR = String.fromCharCode(0);
     function readColumnarValue(col, dict, i) {
@@ -641,20 +634,20 @@ var PivotData = (function() {
       }
       this.tree[flatRowKey][flatColKey].push(record);
     }
-  };
-  PivotData2.prototype.pushRecord = function(record) {
+  }
+  pushRecord(record) {
     if (this.filter(record)) {
       this.sorted = false;
       this.processRecord(record);
     }
-  };
-  PivotData2.prototype.pushChunk = function(columnarInput, startIdx, endIdx) {
+  }
+  pushChunk(columnarInput, startIdx, endIdx) {
     this.sorted = false;
     for (let i = startIdx; i < endIdx; i++) {
       this.processRecord(i, columnarInput);
     }
-  };
-  PivotData2.prototype.getAggregator = function(rowKey, colKey) {
+  }
+  getAggregator(rowKey, colKey) {
     var _a;
     const flatRowKey = rowKey.join(String.fromCharCode(0));
     const flatColKey = colKey.join(String.fromCharCode(0));
@@ -670,14 +663,13 @@ var PivotData = (function() {
     }
     return agg != null ? agg : { push: () => {
     }, value: () => null, format: () => "" };
-  };
-  return PivotData2;
-})();
-var PivotStream = (function() {
-  function PivotStream2(opts) {
-    if (opts == null) opts = {};
-    this.onComplete = opts.onComplete != null ? opts.onComplete : function() {
-    };
+  }
+};
+var PivotStream = class {
+  constructor(opts) {
+    var _a;
+    this.onComplete = (_a = opts == null ? void 0 : opts.onComplete) != null ? _a : (() => {
+    });
     this._count = 0;
     this._colsInit = false;
     this._stringCols = [];
@@ -686,89 +678,91 @@ var PivotStream = (function() {
     this._dictIndex = {};
     this._arrays = {};
   }
-  PivotStream2.prototype._initCols = function(record) {
+  // Detect column types from the first record and initialise storage
+  _initCols(record) {
     for (const col of Object.keys(record)) {
       const val = record[col];
       if (typeof val === "number") {
         this._numericCols.push(col);
-        this._arrays[col] = [];
       } else {
         this._stringCols.push(col);
         this._dicts[col] = [];
         this._dictIndex[col] = /* @__PURE__ */ new Map();
-        this._arrays[col] = [];
       }
+      this._arrays[col] = [];
     }
     this._colsInit = true;
-  };
-  PivotStream2.prototype._enc = function(col, val) {
+  }
+  // O(1) dictionary encoding via Map
+  _enc(col, val) {
     const str = val != null ? String(val) : "null";
     if (!this._dictIndex[col].has(str)) {
       this._dictIndex[col].set(str, this._dicts[col].length);
       this._dicts[col].push(str);
     }
     return this._dictIndex[col].get(str);
-  };
-  PivotStream2.prototype.push = function(record) {
+  }
+  // Push one record — values immediately encoded, no JS object retained
+  push(record) {
     if (!this._colsInit) this._initCols(record);
     for (const col of this._stringCols) this._arrays[col].push(this._enc(col, record[col]));
     for (const col of this._numericCols) this._arrays[col].push(Number(record[col]) || 0);
     this._count++;
-  };
-  PivotStream2.prototype.toColumnar = function() {
+  }
+  // Convert accumulated arrays → ColumnarInput ready for PivotData
+  toColumnar() {
     const columns = {};
     const columnNames = [];
     const dicts = {};
-    const allCols = this._stringCols.concat(this._numericCols);
-    for (const col of allCols) {
+    for (const col of this._stringCols) {
       columnNames.push(col);
-      if (this._stringCols.indexOf(col) !== -1) {
-        columns[col] = new Uint16Array(this._arrays[col]);
-        dicts[col] = this._dicts[col];
-      } else {
-        columns[col] = new Float64Array(this._arrays[col]);
-      }
+      columns[col] = new Uint16Array(this._arrays[col]);
+      dicts[col] = this._dicts[col];
+    }
+    for (const col of this._numericCols) {
+      columnNames.push(col);
+      columns[col] = new Float64Array(this._arrays[col]);
     }
     return { columnFormat: true, columnNames, columns, dicts };
-  };
-  PivotStream2.prototype.done = function() {
-    return this.onComplete(null, this._count, this);
-  };
-  PivotStream2.prototype.fromFetch = function(url, fetchOpts) {
-    const self = this;
-    return fetch(url, fetchOpts != null ? fetchOpts : {}).then(function(res) {
+  }
+  // Signal end of stream — fires onComplete(null, totalCount, stream)
+  done() {
+    this.onComplete(null, this._count, this);
+  }
+  // Consume a fetch() response as NDJSON (one JSON object per line)
+  fromFetch(url, fetchOpts) {
+    return fetch(url, fetchOpts != null ? fetchOpts : {}).then((res) => {
       if (!res.ok) throw new Error("PivotStream fetch failed: " + res.status + " " + res.statusText);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      function pump() {
-        return reader.read().then(function({ done, value }) {
+      const pump = () => {
+        return reader.read().then(({ done, value }) => {
           if (done) {
             buffer.split("\n").forEach((line) => {
               if (line.trim().length > 0) {
                 try {
-                  self.push(JSON.parse(line));
+                  this.push(JSON.parse(line));
                 } catch (e) {
                 }
               }
             });
-            self.done();
+            this.done();
             return;
           }
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop();
           lines.forEach((line) => {
-            if (line.trim().length > 0) self.push(JSON.parse(line));
+            if (line.trim().length > 0) this.push(JSON.parse(line));
           });
           return pump();
         });
-      }
+      };
       return pump();
     });
-  };
-  return PivotStream2;
-})();
+  }
+};
 function pivotTableRenderer(pivotData, opts) {
   const table = Object.assign({ clickCallback: null, rowTotals: true, colTotals: true }, opts && opts.table);
   const localeStrings = Object.assign({ totals: "Totals" }, opts && opts.localeStrings);

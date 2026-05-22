@@ -11,11 +11,27 @@ import {
   pivotTableRenderer,
   renderers,
   sortAs
-} from "../chunk-7ZP5X27I.mjs";
+} from "../chunk-SEBP56Q2.mjs";
 
 // src/adapters/jquery.ts
 var indexOf = [].indexOf;
 var hasProp = {}.hasOwnProperty;
+function deepMerge(...sources) {
+  var _a;
+  const result = {};
+  for (const src of sources) {
+    if (src == null) continue;
+    for (const key of Object.keys(src)) {
+      const val = src[key];
+      if (val !== null && typeof val === "object" && !Array.isArray(val) && typeof val !== "function") {
+        result[key] = deepMerge((_a = result[key]) != null ? _a : {}, val);
+      } else {
+        result[key] = val;
+      }
+    }
+  }
+  return result;
+}
 var renderers2 = Object.assign({}, renderers, {
   "Table Barchart": function(data, opts) {
     return $(pivotTableRenderer(data, opts)).barchart();
@@ -66,14 +82,14 @@ $.fn.pivot = function(input, inputOpts, locale) {
     derivedAttributes: {},
     renderer: pivotTableRenderer
   };
-  localeStrings = $.extend(true, {}, locales.en.localeStrings, locales[locale].localeStrings);
+  localeStrings = Object.assign({}, locales.en.localeStrings, locales[locale].localeStrings);
   localeDefaults = {
     rendererOptions: {
       localeStrings
     },
     localeStrings
   };
-  opts = $.extend(true, {}, localeDefaults, $.extend({}, defaults, inputOpts));
+  opts = deepMerge(localeDefaults, Object.assign({}, defaults, inputOpts));
   result = null;
   try {
     pivotData = new opts.dataClass(input, opts);
@@ -136,7 +152,7 @@ $.fn.pivotUI = function(input, inputOpts, overwrite, locale) {
     },
     sorters: {}
   };
-  localeStrings = $.extend(true, {}, locales.en.localeStrings, locales[locale].localeStrings);
+  localeStrings = Object.assign({}, locales.en.localeStrings, locales[locale].localeStrings);
   localeDefaults = {
     rendererOptions: {
       localeStrings
@@ -145,7 +161,7 @@ $.fn.pivotUI = function(input, inputOpts, overwrite, locale) {
   };
   existingOpts = this.data("pivotUIOptions");
   if (existingOpts == null || overwrite) {
-    opts = $.extend(true, {}, localeDefaults, $.extend({}, defaults, inputOpts));
+    opts = deepMerge(localeDefaults, Object.assign({}, defaults, inputOpts));
   } else {
     opts = existingOpts;
   }
@@ -543,7 +559,7 @@ $.fn.pivotUI = function(input, inputOpts, overwrite, locale) {
           return true;
         };
         pivotTable.pivot(materializedInput, subopts);
-        pivotUIOptions = $.extend({}, opts, {
+        pivotUIOptions = Object.assign({}, opts, {
           cols: subopts.cols,
           rows: subopts.rows,
           colOrder: subopts.colOrder,

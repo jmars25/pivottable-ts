@@ -14,6 +14,10 @@
     "./jquery": {
       "import": "./dist/adapters/jquery.mjs",
       "require": "./dist/adapters/jquery.js"
+    },
+    "./vanilla": {
+      "import": "./dist/adapters/vanilla.mjs",
+      "require": "./dist/adapters/vanilla.js"
     }
   },
   "files": [

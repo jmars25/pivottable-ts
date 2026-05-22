@@ -6,14 +6,14 @@
 
 
 
-interface AggregatorInstance {
+export interface AggregatorInstance {
   push(record: Record<string, any>): void;
   value(): number | string | null;
   format(x: number | string | null): string;
   numInputs?: number;
 }
 
-interface NumberFormatOptions {
+export interface NumberFormatOptions {
   digitsAfterDecimal?: number;
   scaler?: number;
   thousandsSep?: string;
@@ -22,7 +22,7 @@ interface NumberFormatOptions {
   suffix?: string;
 }
 
-interface ColumnarInput {
+export interface ColumnarInput {
   columnFormat: true;
   columnNames: string[];
   columns: Record<string, Uint16Array | Float64Array>;
@@ -31,7 +31,7 @@ interface ColumnarInput {
 
 export type SortOrder = "key_a_to_z" | "key_z_to_a" | "value_a_to_z" | "value_z_to_a";
 
-interface PivotDataOptions {
+export interface PivotDataOptions {
   aggregator?:        (pivotData: any, rowKey: string[], colKey: string[]) => AggregatorInstance;
   aggregatorName?:    string;
   cols?:              string[];
@@ -43,6 +43,49 @@ interface PivotDataOptions {
   derivedAttributes?: Record<string, (record: Record<string, any>) => any>;
   filter?:            (record: Record<string, any>) => boolean;
   lazy?:              boolean;
+}
+
+export interface PivotDataInstance {
+  rowAttrs:  string[];
+  colAttrs:  string[];
+  valAttrs:  string[];
+  getRowKeys(): string[][];
+  getColKeys(): string[][];
+  getAggregator(rowKey: string[], colKey: string[]): AggregatorInstance;
+  forEachMatchingRecord(
+    criteria: Record<string, string>,
+    callback:  (record: Record<string, any>) => void
+  ): void;
+  pushRecord(record: Record<string, any>): void;
+  pushChunk(input: ColumnarInput, start: number, end: number): void;
+}
+
+export interface RendererOptions {
+  table?: {
+    clickCallback?: ((
+      e:         MouseEvent,
+      value:     number | string | null,
+      rowKey:    string[],
+      colKey:    string[],
+      pivotData: PivotDataInstance
+    ) => void) | null;
+    rowTotals?: boolean;
+    colTotals?: boolean;
+  };
+  localeStrings?: {
+    totals?: string;
+  };
+}
+
+export interface PivotStreamOptions {
+  onComplete?: (error: null, count: number, stream: PivotStreamInstance) => void;
+}
+
+export interface PivotStreamInstance {
+  push(record: Record<string, any>): void;
+  done(): void;
+  toColumnar(): ColumnarInput;
+  fromFetch(url: string, fetchOpts?: RequestInit): Promise<void>;
 }
 
 // ─── Formatting utilities ─────────────────────────────────────────────────
@@ -469,29 +512,42 @@ export const locales: Record<string, any> = {
 
 // ─── PivotData ────────────────────────────────────────────────────────────
 
-export const PivotData: any = (function() {
+export class PivotData implements PivotDataInstance {
 
-  function PivotData(this: any, input: any, opts: PivotDataOptions) {
-    if (opts == null) opts = {};
+  // ── Public typed properties (required by PivotDataInstance) ───────────────
+  rowAttrs:  string[];
+  colAttrs:  string[];
+  valAttrs:  string[];
 
-    // Bind methods so they can be passed as callbacks without losing `this`
-    this.getAggregator = this.getAggregator.bind(this);
-    this.getRowKeys    = this.getRowKeys.bind(this);
-    this.getColKeys    = this.getColKeys.bind(this);
-    this.sortKeys      = this.sortKeys.bind(this);
-    this.arrSort       = this.arrSort.bind(this);
+  // ── Internal properties ───────────────────────────────────────────────────
+  input:             any;
+  aggregator:        any;
+  aggregatorName:    string;
+  sorters:           any;
+  rowOrder:          SortOrder;
+  colOrder:          SortOrder;
+  derivedAttributes: Record<string, (record: Record<string, any>) => any>;
+  filter:            (record: Record<string, any>) => boolean;
+  tree:              Record<string, Record<string, AggregatorInstance>>;
+  rowKeys:           string[][];
+  colKeys:           string[][];
+  rowTotals:         Record<string, AggregatorInstance>;
+  colTotals:         Record<string, AggregatorInstance>;
+  allTotal!:         AggregatorInstance;   // ! = set in constructor via aggregator call
+  sorted:            boolean;
 
-    this.input              = input;
-    this.aggregator         = opts.aggregator         != null ? opts.aggregator         : aggregatorTemplates.count()();
-    this.aggregatorName     = opts.aggregatorName     != null ? opts.aggregatorName     : "Count";
-    this.colAttrs           = opts.cols               != null ? opts.cols               : [];
-    this.rowAttrs           = opts.rows               != null ? opts.rows               : [];
-    this.valAttrs           = opts.vals               != null ? opts.vals               : [];
-    this.sorters            = opts.sorters            != null ? opts.sorters            : {};
-    this.rowOrder           = opts.rowOrder           != null ? opts.rowOrder           : "key_a_to_z";
-    this.colOrder           = opts.colOrder           != null ? opts.colOrder           : "key_a_to_z";
-    this.derivedAttributes  = opts.derivedAttributes  != null ? opts.derivedAttributes  : {};
-    this.filter             = opts.filter             != null ? opts.filter             : function() { return true; };
+  constructor(input: any, opts: PivotDataOptions = {}) {
+    this.input             = input;
+    this.aggregator        = opts.aggregator        ?? aggregatorTemplates.count()();
+    this.aggregatorName    = opts.aggregatorName    ?? "Count";
+    this.colAttrs          = opts.cols              ?? [];
+    this.rowAttrs          = opts.rows              ?? [];
+    this.valAttrs          = opts.vals              ?? [];
+    this.sorters           = opts.sorters           ?? {};
+    this.rowOrder          = opts.rowOrder          ?? "key_a_to_z";
+    this.colOrder          = opts.colOrder          ?? "key_a_to_z";
+    this.derivedAttributes = opts.derivedAttributes ?? {};
+    this.filter            = opts.filter            ?? (() => true);
 
     this.tree      = {};
     this.rowKeys   = [];
@@ -516,17 +572,22 @@ export const PivotData: any = (function() {
     }
   }
 
-  PivotData.forEachRecord = function(input: any, derivedAttributes: any, f: any) {
+  // ── Static ────────────────────────────────────────────────────────────────
+
+  static forEachRecord(
+    input:             any,
+    derivedAttributes: Record<string, (record: Record<string, any>) => any>,
+    f:                 (record: Record<string, any>) => void
+  ): void {
     // Fast path: no derived attributes — skip wrapper entirely
-    let addRecord: any;
+    let addRecord: (record: any) => void;
     if (Object.keys(derivedAttributes).length === 0) {
       addRecord = f;
     } else {
       addRecord = function(record: any) {
         for (const attr in derivedAttributes) {
-          const deriver  = derivedAttributes[attr];
-          const derived  = deriver(record);
-          record[attr]   = derived != null ? derived : record[attr];
+          const derived = derivedAttributes[attr](record);
+          record[attr]  = derived != null ? derived : record[attr];
         }
         f(record);
       };
@@ -583,22 +644,26 @@ export const PivotData: any = (function() {
     } else {
       throw new Error("unknown input format");
     }
-  };
+  }
 
-  PivotData.prototype.forEachMatchingRecord = function(criteria: any, callback: any) {
-    return PivotData.forEachRecord(this.input, this.derivedAttributes, (record: any) => {
+  // ── Instance methods ──────────────────────────────────────────────────────
+
+  forEachMatchingRecord(
+    criteria: Record<string, string>,
+    callback: (record: Record<string, any>) => void
+  ): void {
+    PivotData.forEachRecord(this.input, this.derivedAttributes, (record: any) => {
       if (!this.filter(record)) return;
       for (const k in criteria) {
-        const v = criteria[k];
-        if (v !== (record[k] != null ? record[k] : "null")) return;
+        if (criteria[k] !== (record[k] != null ? record[k] : "null")) return;
       }
       callback(record);
     });
-  };
+  }
 
-  PivotData.prototype.arrSort = function(attrs: string[]) {
+  arrSort(attrs: string[]): (a: any[], b: any[]) => number {
     // Build a per-attribute sorter array, then compare element-by-element
-    const sortersArr = attrs.map((a: string) => getSort(this.sorters, a));
+    const sortersArr = attrs.map(a => getSort(this.sorters, a));
     return function(a: any[], b: any[]) {
       for (let i = 0; i < sortersArr.length; i++) {
         const comparison = sortersArr[i](a[i], b[i]);
@@ -606,50 +671,50 @@ export const PivotData: any = (function() {
       }
       return 0;
     };
-  };
+  }
 
-  PivotData.prototype.sortKeys = function() {
+  sortKeys(): void {
     if (!this.sorted) {
       this.sorted = true;
       const v = (r: any, c: any) => this.getAggregator(r, c).value();
       switch (this.rowOrder) {
         case "value_a_to_z":
-          this.rowKeys.sort((a: any, b: any) =>  naturalSort(v(a, []), v(b, [])));
+          this.rowKeys.sort((a, b) =>  naturalSort(v(a, []), v(b, [])));
           break;
         case "value_z_to_a":
-          this.rowKeys.sort((a: any, b: any) => -naturalSort(v(a, []), v(b, [])));
+          this.rowKeys.sort((a, b) => -naturalSort(v(a, []), v(b, [])));
           break;
         default:
           this.rowKeys.sort(this.arrSort(this.rowAttrs));
       }
       switch (this.colOrder) {
         case "value_a_to_z":
-          this.colKeys.sort((a: any, b: any) =>  naturalSort(v([], a), v([], b)));
+          this.colKeys.sort((a, b) =>  naturalSort(v([], a), v([], b)));
           break;
         case "value_z_to_a":
-          this.colKeys.sort((a: any, b: any) => -naturalSort(v([], a), v([], b)));
+          this.colKeys.sort((a, b) => -naturalSort(v([], a), v([], b)));
           break;
         default:
           this.colKeys.sort(this.arrSort(this.colAttrs));
       }
     }
-  };
+  }
 
-  PivotData.prototype.getColKeys = function() {
+  getColKeys(): string[][] {
     this.sortKeys();
     return this.colKeys;
-  };
+  }
 
-  PivotData.prototype.getRowKeys = function() {
+  getRowKeys(): string[][] {
     this.sortKeys();
     return this.rowKeys;
-  };
+  }
 
-  PivotData.prototype.processRecord = function(recordOrIndex: any, columnarInput?: ColumnarInput) {
+  processRecord(recordOrIndex: any, columnarInput?: ColumnarInput): void {
     const NULL_STR = String.fromCharCode(0);
 
     // Read a single value from a columnar column at row i, decoding dict if present
-    function readColumnarValue(col: any, dict: any[] | undefined, i: number) {
+    function readColumnarValue(col: any, dict: any[] | undefined, i: number): any {
       if (col == null) return "null";
       return dict ? dict[col[i]] : col[i];
     }
@@ -660,7 +725,7 @@ export const PivotData: any = (function() {
 
     if (columnarInput != null) {
       // Columnar path: recordOrIndex is an integer row index
-      const i = recordOrIndex;
+      const i = recordOrIndex as number;
       for (const attr of this.colAttrs) {
         colKey.push(readColumnarValue(columnarInput.columns[attr], columnarInput.dicts?.[attr], i));
       }
@@ -708,23 +773,23 @@ export const PivotData: any = (function() {
       }
       this.tree[flatRowKey][flatColKey].push(record);
     }
-  };
+  }
 
-  PivotData.prototype.pushRecord = function(record: any) {
+  pushRecord(record: Record<string, any>): void {
     if (this.filter(record)) {
       this.sorted = false;
       this.processRecord(record);
     }
-  };
+  }
 
-  PivotData.prototype.pushChunk = function(columnarInput: ColumnarInput, startIdx: number, endIdx: number) {
+  pushChunk(columnarInput: ColumnarInput, startIdx: number, endIdx: number): void {
     this.sorted = false;
     for (let i = startIdx; i < endIdx; i++) {
       this.processRecord(i, columnarInput);
     }
-  };
+  }
 
-  PivotData.prototype.getAggregator = function(rowKey: any[], colKey: any[]): AggregatorInstance {
+  getAggregator(rowKey: string[], colKey: string[]): AggregatorInstance {
     const flatRowKey = rowKey.join(String.fromCharCode(0));
     const flatColKey = colKey.join(String.fromCharCode(0));
     let agg: AggregatorInstance | undefined;
@@ -738,131 +803,133 @@ export const PivotData: any = (function() {
       agg = this.tree[flatRowKey]?.[flatColKey];
     }
     // Fallback stub for cells that have no data — satisfies AggregatorInstance
-    return agg != null ? agg : { push: () => {}, value: () => null, format: () => "" };
-  };
-
-  return PivotData;
-
-})();
+    return agg ?? { push: () => {}, value: () => null, format: () => "" };
+  }
+}
 
 // ─── PivotStream ──────────────────────────────────────────────────────────
 // Builds columnar TypedArrays from a streaming source.
 // Strings are dictionary-encoded on the fly; numbers stored as Float64.
-// Call stream.toColumnar() inside onComplete to get a columnarInput
+// Call stream.toColumnar() inside onComplete to get a ColumnarInput
 // ready to pass straight into new PivotData(...).
 
-export const PivotStream: any = (function() {
+export class PivotStream implements PivotStreamInstance {
 
-  function PivotStream(this: any, opts?: any) {
-    if (opts == null) opts = {};
-    this.onComplete   = opts.onComplete != null ? opts.onComplete : function() {};
-    this._count       = 0;
-    this._colsInit    = false;
-    this._stringCols  = [] as string[];
-    this._numericCols = [] as string[];
-    this._dicts       = {} as Record<string, string[]>;
-    this._dictIndex   = {} as Record<string, Map<string, number>>;
-    this._arrays      = {} as Record<string, any[]>;
+  // Called when done() is invoked — receives (null, recordCount, stream)
+  onComplete: (error: null, count: number, stream: PivotStreamInstance) => void;
+
+  private _count:       number;
+  private _colsInit:    boolean;
+  private _stringCols:  string[];
+  private _numericCols: string[];
+  private _dicts:       Record<string, string[]>;
+  private _dictIndex:   Record<string, Map<string, number>>;
+  private _arrays:      Record<string, number[]>;
+
+  constructor(opts?: PivotStreamOptions) {
+    this.onComplete    = opts?.onComplete ?? (() => {});
+    this._count        = 0;
+    this._colsInit     = false;
+    this._stringCols   = [];
+    this._numericCols  = [];
+    this._dicts        = {};
+    this._dictIndex    = {};
+    this._arrays       = {};
   }
 
   // Detect column types from the first record and initialise storage
-  PivotStream.prototype._initCols = function(record: any) {
+  private _initCols(record: Record<string, any>): void {
     for (const col of Object.keys(record)) {
       const val = record[col];
       if (typeof val === "number") {
         this._numericCols.push(col);
-        this._arrays[col] = [];
       } else {
         this._stringCols.push(col);
         this._dicts[col]     = [];
         this._dictIndex[col] = new Map();
-        this._arrays[col]    = [];
       }
+      this._arrays[col] = [];
     }
     this._colsInit = true;
-  };
+  }
 
   // O(1) dictionary encoding via Map
-  PivotStream.prototype._enc = function(col: string, val: any): number {
+  private _enc(col: string, val: any): number {
     const str = val != null ? String(val) : "null";
     if (!this._dictIndex[col].has(str)) {
       this._dictIndex[col].set(str, this._dicts[col].length);
       this._dicts[col].push(str);
     }
     return this._dictIndex[col].get(str)!;
-  };
+  }
 
   // Push one record — values immediately encoded, no JS object retained
-  PivotStream.prototype.push = function(record: any) {
+  push(record: Record<string, any>): void {
     if (!this._colsInit) this._initCols(record);
     for (const col of this._stringCols)  this._arrays[col].push(this._enc(col, record[col]));
     for (const col of this._numericCols) this._arrays[col].push(Number(record[col]) || 0);
     this._count++;
-  };
+  }
 
-  // Convert accumulated arrays → columnarInput ready for PivotData
-  PivotStream.prototype.toColumnar = function(): ColumnarInput {
-    const columns:     Record<string, any>    = {};
-    const columnNames: string[]               = [];
-    const dicts:       Record<string, string[]> = {};
-    const allCols = this._stringCols.concat(this._numericCols);
-    for (const col of allCols) {
+  // Convert accumulated arrays → ColumnarInput ready for PivotData
+  toColumnar(): ColumnarInput {
+    const columns:     Record<string, Uint16Array | Float64Array> = {};
+    const columnNames: string[]                                   = [];
+    const dicts:       Record<string, string[]>                   = {};
+    for (const col of this._stringCols) {
       columnNames.push(col);
-      if (this._stringCols.indexOf(col) !== -1) {
-        columns[col] = new Uint16Array(this._arrays[col]);
-        dicts[col]   = this._dicts[col];
-      } else {
-        columns[col] = new Float64Array(this._arrays[col]);
-      }
+      columns[col] = new Uint16Array(this._arrays[col]);
+      dicts[col]   = this._dicts[col];
+    }
+    for (const col of this._numericCols) {
+      columnNames.push(col);
+      columns[col] = new Float64Array(this._arrays[col]);
     }
     return { columnFormat: true, columnNames, columns, dicts };
-  };
+  }
 
   // Signal end of stream — fires onComplete(null, totalCount, stream)
-  PivotStream.prototype.done = function() {
-    return this.onComplete(null, this._count, this);
-  };
+  done(): void {
+    this.onComplete(null, this._count, this);
+  }
 
   // Consume a fetch() response as NDJSON (one JSON object per line)
-  PivotStream.prototype.fromFetch = function(url: string, fetchOpts?: any): Promise<void> {
-    const self = this;
-    return fetch(url, fetchOpts != null ? fetchOpts : {}).then(function(res) {
+  fromFetch(url: string, fetchOpts?: RequestInit): Promise<void> {
+    return fetch(url, fetchOpts ?? {}).then(res => {
       if (!res.ok) throw new Error("PivotStream fetch failed: " + res.status + " " + res.statusText);
       const reader  = res.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 
-      function pump(): Promise<void> {
-        return reader.read().then(function({ done, value }) {
+      // Arrow function so `this` stays bound to the PivotStream instance
+      const pump = (): Promise<void> => {
+        return reader.read().then(({ done, value }) => {
           if (done) {
             buffer.split("\n").forEach(line => {
               if (line.trim().length > 0) {
-                try { self.push(JSON.parse(line)); } catch(e) {}
+                try { this.push(JSON.parse(line)); } catch(e) {}
               }
             });
-            self.done();
+            this.done();
             return;
           }
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop()!;
           lines.forEach(line => {
-            if (line.trim().length > 0) self.push(JSON.parse(line));
+            if (line.trim().length > 0) this.push(JSON.parse(line));
           });
           return pump();
         });
-      }
+      };
       return pump();
     });
-  };
-
-  return PivotStream;
-
-})();
+  }
+}
 
 // ─── Default table renderer ───────────────────────────────────────────────
 
-export function pivotTableRenderer(pivotData: any, opts?: any): HTMLTableElement {
+export function pivotTableRenderer(pivotData: PivotDataInstance, opts?: RendererOptions): HTMLTableElement {
   const table         = Object.assign({ clickCallback: null, rowTotals: true, colTotals: true }, opts && opts.table);
   const localeStrings = Object.assign({ totals: "Totals" }, opts && opts.localeStrings);
 

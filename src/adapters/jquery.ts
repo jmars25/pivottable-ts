@@ -33,6 +33,25 @@ import {
 const indexOf = [].indexOf;
 const hasProp  = {}.hasOwnProperty;
 
+// Deep-merge any number of plain objects into a new object.
+// Arrays and functions are copied by reference, not recursed into.
+// Replaces $.extend(true, {}, ...) — no jQuery required.
+function deepMerge(...sources: Record<string, any>[]): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const src of sources) {
+    if (src == null) continue;
+    for (const key of Object.keys(src)) {
+      const val = src[key];
+      if (val !== null && typeof val === "object" && !Array.isArray(val) && typeof val !== "function") {
+        result[key] = deepMerge(result[key] ?? {}, val);
+      } else {
+        result[key] = val;
+      }
+    }
+  }
+  return result;
+}
+
 // ─── jQuery-specific renderers ────────────────────────────────────────────
 // These wrap pivotTableRenderer with jQuery post-processing.
 
@@ -92,14 +111,14 @@ $.fn.pivot = function(input: any, inputOpts: any, locale: any) {
     derivedAttributes: {},
     renderer: pivotTableRenderer
   };
-  localeStrings = $.extend(true, {}, locales.en.localeStrings, locales[locale].localeStrings);
+  localeStrings = Object.assign({}, locales.en.localeStrings, locales[locale].localeStrings);
   localeDefaults = {
     rendererOptions: {
       localeStrings: localeStrings
     },
     localeStrings: localeStrings
   };
-  opts = $.extend(true, {}, localeDefaults, $.extend({}, defaults, inputOpts));
+  opts = deepMerge(localeDefaults, Object.assign({}, defaults, inputOpts));
   result = null;
   try {
     pivotData = new opts.dataClass(input, opts);
@@ -164,7 +183,7 @@ $.fn.pivotUI = function(input: any, inputOpts: any, overwrite: any, locale: any)
     },
     sorters: {}
   };
-  localeStrings = $.extend(true, {}, locales.en.localeStrings, locales[locale].localeStrings);
+  localeStrings = Object.assign({}, locales.en.localeStrings, locales[locale].localeStrings);
   localeDefaults = {
     rendererOptions: {
       localeStrings: localeStrings
@@ -173,7 +192,7 @@ $.fn.pivotUI = function(input: any, inputOpts: any, overwrite: any, locale: any)
   };
   existingOpts = this.data("pivotUIOptions");
   if ((existingOpts == null) || overwrite) {
-    opts = $.extend(true, {}, localeDefaults, $.extend({}, defaults, inputOpts));
+    opts = deepMerge(localeDefaults, Object.assign({}, defaults, inputOpts));
   } else {
     opts = existingOpts;
   }
@@ -571,7 +590,7 @@ $.fn.pivotUI = function(input: any, inputOpts: any, overwrite: any, locale: any)
           return true;
         };
         pivotTable.pivot(materializedInput, subopts);
-        pivotUIOptions = $.extend({}, opts, {
+        pivotUIOptions = Object.assign({}, opts, {
           cols:            subopts.cols,
           rows:            subopts.rows,
           colOrder:        subopts.colOrder,
