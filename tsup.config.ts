@@ -6,6 +6,7 @@ export default defineConfig({
     "src/adapters/jquery.ts",
     "src/adapters/vanilla.ts",
     "src/renderers/chartjs.ts",
+    "src/locales/index.ts",
   ],
   format: ["cjs", "esm"],   // outputs pivot.js (CJS) and pivot.mjs (ESM)
   dts: true,

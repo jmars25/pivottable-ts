@@ -23,6 +23,11 @@
       "types":   "./dist/renderers/chartjs.d.ts",
       "import":  "./dist/renderers/chartjs.mjs",
       "require": "./dist/renderers/chartjs.js"
+    },
+    "./locales": {
+      "types":   "./dist/locales/index.d.ts",
+      "import":  "./dist/locales/index.mjs",
+      "require": "./dist/locales/index.js"
     }
   },
   "files": [
