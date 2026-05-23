@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PivotTable — Vanilla Adapter Test</title>
+
+  <!-- Base pivot CSS, then vanilla-specific additions -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css">
+  <link rel="stylesheet" href="../dist/pivot.css">
+
+  <!--
+    Import map: tells the browser where to resolve the bare "sortablejs"
+    specifier that vanilla.mjs emits (it's a peer dep, so tsup leaves it external).
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "sortablejs": "https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/+esm"
+    }
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; font-size: 14px; margin: 0; background: #f5f5f5; color: #222; }
+
+    h1  { margin: 0; font-size: 1.3rem; }
+    h2  { font-size: 1rem; margin: 0 0 8px; }
+    p   { margin: 4px 0; }
+
+    header { background: #16213e; color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 16px; }
+    header span { opacity: .6; font-size: .85rem; }
+
+    #suite { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; }
+    .card-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; background: #f8f8f8; border-bottom: 1px solid #ddd;
+      cursor: pointer; user-select: none;
+    }
+    .card-header:hover { background: #efefef; }
+    .card-title  { font-weight: 600; flex: 1; }
+    .card-body   { padding: 14px; display: none; }
+    .card.open .card-body { display: block; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
+    .badge-pass    { background: #d4edda; color: #155724; }
+    .badge-fail    { background: #f8d7da; color: #721c24; }
+    .badge-pending { background: #fff3cd; color: #856404; }
+    .badge-info    { background: #d1ecf1; color: #0c5460; }
+
+    .timer { font-size: .8rem; color: #888; }
+
+    .assert-list { list-style: none; padding: 0; margin: 0 0 10px; }
+    .assert-list li { padding: 3px 0 3px 22px; position: relative; font-size: .85rem; }
+    .assert-list li::before { position: absolute; left: 0; top: 3px; }
+    .assert-list .pass::before { content: "✓"; color: #28a745; }
+    .assert-list .fail::before { content: "✗"; color: #dc3545; font-weight: 700; }
+    .assert-list .info::before { content: "ℹ"; color: #17a2b8; }
+
+    .pvtTable { border-collapse: collapse; margin-top: 10px; font-size: .85rem; }
+    .pvtTable th, .pvtTable td { border: 1px solid #ccc; padding: 4px 8px; text-align: right; white-space: nowrap; }
+    .pvtTable th { background: #f0f0f0; text-align: center; font-weight: 600; }
+    .pvtTable .pvtAxisLabel, .pvtTable .pvtTotalLabel { background: #e8e8e8; font-style: italic; }
+    .pvtTable .pvtRowLabel  { text-align: left; background: #fafafa; }
+    .pvtTable .pvtTotal     { background: #f5f5f5; font-weight: 600; }
+    .pvtTable .pvtGrandTotal{ background: #ececec; font-weight: 700; }
+
+    #global-status { padding: 10px 20px; font-size: .9rem; }
+
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>PivotTable — Vanilla Adapter</h1>
+  <span id="build-stamp">dist/adapters/vanilla.mjs · zero jQuery</span>
+  <span id="run-status" style="margin-left:auto;"></span>
+</header>
+
+<div id="global-status"></div>
+
+<!-- ── Interactive demo ────────────────────────────────────────────────────── -->
+<div style="padding: 16px 20px 0;">
+  <div class="card open">
+    <div class="card-header" style="cursor:default">
+      <span class="card-title">Interactive createPivotUI — drag fields, change aggregator &amp; renderer</span>
+      <span class="badge badge-info">live · no jQuery</span>
+    </div>
+    <div class="card-body" style="display:block; overflow-x:auto">
+      <div id="pivot-ui-output"></div>
+    </div>
+  </div>
+</div>
+
+<div id="suite"></div>
+
+<script type="module">
+// ─────────────────────────────────────────────────────────────────────────────
+// Load the vanilla adapter (ESM — no jQuery)
+// ─────────────────────────────────────────────────────────────────────────────
+import {
+  createPivot,
+  createPivotUI,
+  pivotUtilities,
+  heatmap,
+  barchart,
+  vanillaRenderers,
+} from "../dist/adapters/vanilla.mjs";
+
+const {
+  PivotData, PivotStream,
+  aggregatorTemplates, aggregators,
+  numberFormat, naturalSort,
+  derivers, locales,
+} = pivotUtilities;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mini test harness (same shape as dev_test.html)
+// ─────────────────────────────────────────────────────────────────────────────
+const suite = [];
+let passCount = 0, failCount = 0;
+
+function test(title, fn)            { suite.push({ title, fn }); }
+function assert(cond, msg)          { return { ok: !!cond, msg }; }
+function assertEqual(a, b, msg)     {
+  const ok = a === b;
+  return { ok, msg: msg + (ok ? "" : `  (expected ${JSON.stringify(b)}, got ${JSON.stringify(a)})`) };
+}
+function assertClose(a, b, tol, msg) {
+  const ok = Math.abs(a - b) <= (tol ?? 0.001);
+  return { ok, msg: msg + (ok ? "" : `  (expected ~${b}, got ${a})`) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared sample data
+// ─────────────────────────────────────────────────────────────────────────────
+const ROWS = [
+  { region: "East",  product: "Widget", year: "2023", sales: 100 },
+  { region: "East",  product: "Gadget", year: "2023", sales: 200 },
+  { region: "West",  product: "Widget", year: "2023", sales: 150 },
+  { region: "West",  product: "Gadget", year: "2023", sales: 300 },
+  { region: "East",  product: "Widget", year: "2024", sales: 120 },
+  { region: "East",  product: "Gadget", year: "2024", sales: 220 },
+  { region: "West",  product: "Widget", year: "2024", sales: 170 },
+  { region: "West",  product: "Gadget", year: "2024", sales: 350 },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 1 — pivotUtilities exports
+// ─────────────────────────────────────────────────────────────────────────────
+test("Build: pivotUtilities exports", () => [
+  assert(typeof PivotData           === "function", "PivotData is a function"),
+  assert(typeof PivotStream         === "function", "PivotStream is a function"),
+  assert(typeof aggregatorTemplates === "object",   "aggregatorTemplates is an object"),
+  assert(typeof numberFormat        === "function", "numberFormat is a function"),
+  assert(typeof naturalSort         === "function", "naturalSort exported"),
+  assert(typeof heatmap             === "function", "heatmap exported"),
+  assert(typeof barchart            === "function", "barchart exported"),
+  assert(typeof vanillaRenderers    === "object",   "vanillaRenderers exported"),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 2 — vanillaRenderers includes all four post-processors
+// ─────────────────────────────────────────────────────────────────────────────
+test("vanillaRenderers: all four renderers present", () => [
+  assert(typeof vanillaRenderers["Table Barchart"] === "function", "Table Barchart renderer"),
+  assert(typeof vanillaRenderers["Heatmap"]        === "function", "Heatmap renderer"),
+  assert(typeof vanillaRenderers["Row Heatmap"]    === "function", "Row Heatmap renderer"),
+  assert(typeof vanillaRenderers["Col Heatmap"]    === "function", "Col Heatmap renderer"),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 3 — createPivot: static table render
+// ─────────────────────────────────────────────────────────────────────────────
+test("createPivot: static table render", () => {
+  const container = document.createElement("div");
+  createPivot(container, ROWS, {
+    rows: ["region"],
+    cols: ["year"],
+    vals: ["sales"],
+    aggregatorName: "Sum",
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+
+  const table = container.querySelector("table.pvtTable");
+  if (!table) return [assert(false, "table.pvtTable not found")];
+
+  const numRows     = parseInt(table.getAttribute("data-numrows"), 10);
+  const numCols     = parseInt(table.getAttribute("data-numcols"), 10);
+  const grandTotTd  = container.querySelector(".pvtGrandTotal");
+  const grandTotVal = grandTotTd ? grandTotTd.getAttribute("data-value") : null;
+
+  return [
+    assert(table !== null,                                       "table.pvtTable rendered"),
+    assertEqual(numRows, 2,                                      "data-numrows = 2"),
+    assertEqual(numCols, 2,                                      "data-numcols = 2"),
+    assertEqual(grandTotVal, "1610",                             "grand total data-value = 1610"),
+    assert(container.querySelectorAll(".pvtVal").length === 4,   "4 data cells (2×2)"),
+    assert(container.querySelectorAll(".pvtRowLabel").length > 0,"row labels present"),
+    assert(container.querySelectorAll(".pvtColLabel").length > 0,"col labels present"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 4 — createPivotUI: UI structure
+// ─────────────────────────────────────────────────────────────────────────────
+test("createPivotUI: UI structure", async () => {
+  const host = document.createElement("div");
+  document.body.appendChild(host);   // must be in DOM for SortableJS
+  const handle = createPivotUI(host, ROWS, {
+    rows: ["region"], cols: ["year"],
+    vals: ["sales"], aggregatorName: "Sum",
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+
+  // createPivotUI calls refresh() which is setTimeout(refreshDelayed, 10)
+  await new Promise(r => setTimeout(r, 50));
+
+  const results = [
+    assert(host.querySelector("table.pvtUi")        !== null, "pvtUi table rendered"),
+    assert(host.querySelector(".pvtRenderer")       !== null, "renderer <select> present"),
+    assert(host.querySelector(".pvtAggregator")     !== null, "aggregator <select> present"),
+    assert(host.querySelector(".pvtAxisContainer.pvtRows") !== null, "rows axis container"),
+    assert(host.querySelector(".pvtAxisContainer.pvtCols") !== null, "cols axis container"),
+    assert(host.querySelector(".pvtAxisContainer.pvtUnused") !== null, "unused axis container"),
+    assert(host.querySelector(".pvtRendererArea")   !== null, "renderer area present"),
+    assert(host.querySelector("table.pvtTable")     !== null, "pivot table rendered inside UI"),
+    assert(typeof handle.destroy === "function",               "handle.destroy is a function"),
+  ];
+
+  // Verify renderer dropdown includes vanilla post-processors
+  const rendererSelect = host.querySelector(".pvtRenderer");
+  const rendererOptions = rendererSelect
+    ? [...rendererSelect.querySelectorAll("option")].map(o => o.value)
+    : [];
+  results.push(assert(rendererOptions.includes("Heatmap"),         "Heatmap in renderer list"));
+  results.push(assert(rendererOptions.includes("Table Barchart"),  "Table Barchart in renderer list"));
+
+  // Verify rows/cols placed correctly
+  const rowPills = [...host.querySelectorAll(".pvtRows li span.pvtAttr")].map(s => s.dataset.attrName);
+  const colPills = [...host.querySelectorAll(".pvtCols li span.pvtAttr")].map(s => s.dataset.attrName);
+  results.push(assert(rowPills.includes("region"), "region pill in rows zone"));
+  results.push(assert(colPills.includes("year"),   "year pill in cols zone"));
+
+  handle.destroy();
+  results.push(assert(host.innerHTML === "",        "destroy() clears container"));
+  document.body.removeChild(host);
+  return results;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 5 — createPivotUI: filter box per attribute
+// ─────────────────────────────────────────────────────────────────────────────
+test("createPivotUI: filter boxes rendered per attribute", async () => {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const handle = createPivotUI(host, ROWS, {});
+  await new Promise(r => setTimeout(r, 50));
+
+  // One pvtFilterBox per attribute (region, product, year, sales)
+  const filterBoxes = host.querySelectorAll(".pvtFilterBox");
+  // Each li in unused should have a corresponding filter box
+  const unusedPills = host.querySelectorAll(".pvtUnused li");
+  const checkboxes  = host.querySelectorAll("input.pvtFilter");
+
+  const results = [
+    assert(filterBoxes.length > 0,               "at least one filter box rendered"),
+    assertEqual(filterBoxes.length, unusedPills.length, "one filter box per attribute pill"),
+    assert(checkboxes.length > 0,                "filter checkboxes rendered"),
+  ];
+
+  // Each checkbox should have filterAttr + filterValue dataset props
+  const cb = host.querySelector("input.pvtFilter");
+  if (cb) {
+    results.push(assert(cb.dataset.filterAttr  != null, "checkbox has data-filter-attr"));
+    results.push(assert(cb.dataset.filterValue != null, "checkbox has data-filter-value"));
+  }
+
+  handle.destroy();
+  document.body.removeChild(host);
+  return results;
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 6 — heatmap post-processor
+// ─────────────────────────────────────────────────────────────────────────────
+test("heatmap(): cells receive background-color", () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+
+  createPivot(container, ROWS, {
+    rows: ["region"], cols: ["year"],
+    vals: ["sales"], aggregatorName: "Sum",
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+
+  const table = container.querySelector("table.pvtTable");
+  if (!table) { document.body.removeChild(container); return [assert(false, "no table")]; }
+
+  // Before heatmap — cells have no background-color
+  const cellsBefore = [...container.querySelectorAll(".pvtVal")];
+  const hadColorBefore = cellsBefore.some(td => td.style.backgroundColor !== "");
+
+  heatmap(table, "heatmap");
+
+  // After heatmap — data cells should be colored
+  const cellsAfter = [...container.querySelectorAll(".pvtVal")];
+  const allColored = cellsAfter.every(td => td.style.backgroundColor !== "");
+
+  document.body.removeChild(container);
+  return [
+    assert(!hadColorBefore,  "cells have no background-color before heatmap()"),
+    assert(allColored,        "all .pvtVal cells have background-color after heatmap()"),
+    assert(cellsAfter.length === 4, "4 cells colored (2×2 grid)"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 7 — barchart post-processor
+// ─────────────────────────────────────────────────────────────────────────────
+test("barchart(): cells receive bar divs", () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+
+  createPivot(container, ROWS, {
+    rows: ["region"], cols: ["year"],
+    vals: ["sales"], aggregatorName: "Sum",
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+
+  const table = container.querySelector("table.pvtTable");
+  if (!table) { document.body.removeChild(container); return [assert(false, "no table")]; }
+
+  barchart(table);
+
+  // Each data cell's direct child should now be a wrapper div
+  const cells = [...container.querySelectorAll(".pvtVal")];
+  const allWrapped = cells.every(td => td.firstElementChild?.tagName === "DIV");
+  // Each wrapper should contain two divs: the bar + the label
+  const firstWrapper = cells[0]?.firstElementChild;
+  const twoChildren  = firstWrapper ? firstWrapper.children.length === 2 : false;
+
+  document.body.removeChild(container);
+  return [
+    assert(allWrapped,   "every .pvtVal cell wrapped in a <div>"),
+    assert(twoChildren,  "wrapper has 2 children: bar + label"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 8 — vanillaRenderers as renderers option
+// ─────────────────────────────────────────────────────────────────────────────
+test("vanillaRenderers: Heatmap renderer produces colored table", () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+
+  createPivot(container, ROWS, {
+    rows: ["region"], cols: ["year"],
+    vals: ["sales"], aggregatorName: "Sum",
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+    renderer: vanillaRenderers["Heatmap"],
+  });
+
+  const cells = [...container.querySelectorAll(".pvtVal")];
+  const allColored = cells.length > 0 && cells.every(td => td.style.backgroundColor !== "");
+
+  document.body.removeChild(container);
+  return [
+    assert(cells.length === 4, "4 data cells rendered"),
+    assert(allColored,         "Heatmap renderer colorizes cells"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 9 — PivotData core: Sum aggregator (same logic as dev_test.html)
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: Sum aggregator — same results as jQuery path", () => {
+  const pd = new PivotData(ROWS, {
+    rows: ["region"], cols: ["year"],
+    vals: ["sales"],
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+  return [
+    assertEqual(pd.getAggregator([], []).value(),        1610, "Grand total = 1610"),
+    assertEqual(pd.getAggregator(["East"], []).value(),   640, "East total = 640"),
+    assertEqual(pd.getAggregator(["West"], []).value(),   970, "West total = 970"),
+    assertEqual(pd.getAggregator(["East"], ["2023"]).value(), 300, "East/2023 = 300"),
+    assertEqual(pd.getAggregator(["East"], ["2024"]).value(), 340, "East/2024 = 340"),
+    assertEqual(pd.getAggregator(["West"], ["2023"]).value(), 450, "West/2023 = 450"),
+    assertEqual(pd.getAggregator(["West"], ["2024"]).value(), 520, "West/2024 = 520"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 10 — PivotData core: Count aggregator
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotData: Count aggregator", () => {
+  const pd = new PivotData(ROWS, {
+    rows: ["region"],
+    aggregator: aggregatorTemplates.count()(),
+  });
+  return [
+    assertEqual(pd.getAggregator([], []).value(),        8, "Total count = 8"),
+    assertEqual(pd.getAggregator(["East"], []).value(),  4, "East count = 4"),
+    assertEqual(pd.getAggregator(["West"], []).value(),  4, "West count = 4"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 11 — PivotStream → PivotData round-trip
+// ─────────────────────────────────────────────────────────────────────────────
+test("PivotStream: push/done → toColumnar → PivotData", () => new Promise(resolve => {
+  const results = [];
+  const ps = new PivotStream({
+    onComplete(err, count, stream) {
+      results.push(assertEqual(err,   null, "no error"));
+      results.push(assertEqual(count, 8,    "count = 8"));
+      const col = stream.toColumnar();
+      results.push(assert(col.columnFormat === true,                  "columnFormat flag"));
+      results.push(assert(col.columns.region instanceof Uint16Array,  "region is Uint16Array"));
+      results.push(assert(col.columns.sales  instanceof Float64Array, "sales is Float64Array"));
+      const pd = new PivotData(col, {
+        rows: ["region"], cols: ["year"], vals: ["sales"],
+        aggregator: aggregatorTemplates.sum()(["sales"]),
+      });
+      results.push(assertEqual(pd.getAggregator([], []).value(), 1610, "grand total = 1610 via stream"));
+      resolve(results);
+    },
+  });
+  ROWS.forEach(r => ps.push(r));
+  ps.done();
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 12 — showUI: false hides pvtUiCell elements
+// ─────────────────────────────────────────────────────────────────────────────
+test("createPivotUI: showUI=false hides UI cells", async () => {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const handle = createPivotUI(host, ROWS, { showUI: false });
+  await new Promise(r => setTimeout(r, 50));
+
+  const uiCells   = [...host.querySelectorAll(".pvtUiCell")];
+  const allHidden = uiCells.length > 0 &&
+    uiCells.every(el => el.style.display === "none");
+
+  handle.destroy();
+  document.body.removeChild(host);
+  return [
+    assert(uiCells.length > 0, "pvtUiCell elements exist"),
+    assert(allHidden,           "all pvtUiCell elements hidden with showUI=false"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST 13 — destroy() removes state and DOM
+// ─────────────────────────────────────────────────────────────────────────────
+test("createPivotUI: destroy() cleans up", async () => {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const handle = createPivotUI(host, ROWS, {});
+  await new Promise(r => setTimeout(r, 50));
+
+  const hadContent = host.innerHTML !== "";
+  handle.destroy();
+  const nowEmpty = host.innerHTML === "";
+
+  document.body.removeChild(host);
+  return [
+    assert(hadContent, "UI was rendered before destroy()"),
+    assert(nowEmpty,   "container is empty after destroy()"),
+  ];
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Harness runner
+// ─────────────────────────────────────────────────────────────────────────────
+function makeCard(title) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="card-header">
+      <span class="card-title">${title}</span>
+      <span class="badge badge-pending">pending</span>
+      <span class="timer"></span>
+    </div>
+    <div class="card-body"></div>
+  `;
+  card.querySelector(".card-header").addEventListener("click", () => card.classList.toggle("open"));
+  return card;
+}
+
+async function runAll() {
+  const suiteEl = document.getElementById("suite");
+
+  for (const t of suite) {
+    const card  = makeCard(t.title);
+    const badge = card.querySelector(".badge");
+    const timer = card.querySelector(".timer");
+    const body  = card.querySelector(".card-body");
+    suiteEl.appendChild(card);
+
+    const t0 = performance.now();
+    let assertions = [];
+    try {
+      const result = t.fn();
+      assertions = result instanceof Promise ? await result : result;
+    } catch (e) {
+      assertions = [{ ok: false, msg: "Threw: " + (e.message ?? e) }];
+    }
+    const elapsed = (performance.now() - t0).toFixed(1);
+
+    const ul = document.createElement("ul");
+    ul.className = "assert-list";
+    let allPass = true;
+    for (const a of assertions) {
+      const li = document.createElement("li");
+      li.className = a.ok ? "pass" : (a.msg.startsWith("ℹ") ? "info" : "fail");
+      li.textContent = a.msg;
+      ul.appendChild(li);
+      if (!a.ok && !a.msg.startsWith("ℹ")) allPass = false;
+    }
+    body.appendChild(ul);
+    timer.textContent = elapsed + " ms";
+
+    if (allPass) {
+      badge.className = "badge badge-pass"; badge.textContent = "pass"; passCount++;
+    } else {
+      badge.className = "badge badge-fail"; badge.textContent = "fail"; failCount++;
+      card.classList.add("open");
+    }
+  }
+
+  const statusEl = document.getElementById("run-status");
+  const globalEl = document.getElementById("global-status");
+  const total = passCount + failCount;
+  if (failCount === 0) {
+    statusEl.innerHTML = `<span class="badge badge-pass">${passCount}/${total} passed</span>`;
+    globalEl.innerHTML = `<span class="badge badge-pass" style="font-size:.9rem">All ${total} test suites passed</span>`;
+  } else {
+    statusEl.innerHTML = `<span class="badge badge-fail">${failCount} failed / ${total}</span>`;
+    globalEl.innerHTML = `<span class="badge badge-fail" style="font-size:.9rem">${failCount} suite(s) failed</span>`;
+  }
+
+  renderLiveTable();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interactive pivot UI demo
+// ─────────────────────────────────────────────────────────────────────────────
+function makeDemoData(n) {
+  const regions  = ["North", "South", "East", "West"];
+  const products = ["Widget", "Gadget", "Doohickey", "Thingamajig"];
+  const channels = ["Online", "Retail", "Wholesale"];
+  const years    = ["2022", "2023", "2024"];
+  const quarters = ["Q1", "Q2", "Q3", "Q4"];
+  const data = [];
+  for (let i = 0; i < n; i++) {
+    const qty   = Math.floor(Math.random() * 100) + 1;
+    const price = [9.99, 24.99, 49.99, 99.99][i % 4];
+    data.push({
+      Region:   regions[i  % regions.length],
+      Product:  products[i % products.length],
+      Channel:  channels[i % channels.length],
+      Year:     years[i    % years.length],
+      Quarter:  quarters[i % quarters.length],
+      Quantity: qty,
+      Revenue:  Math.round(qty * price * 100) / 100,
+    });
+  }
+  return data;
+}
+
+function renderLiveTable() {
+  const card = makeCard("Live Render: Sum of Sales by Region × Year (visual check)");
+  card.classList.add("open");
+  const body = card.querySelector(".card-body");
+
+  const container = document.createElement("div");
+  createPivot(container, ROWS, {
+    rows: ["region"], cols: ["year"],
+    vals: ["sales"], aggregatorName: "Sum",
+    aggregator: aggregatorTemplates.sum()(["sales"]),
+  });
+  body.appendChild(container);
+
+  const note = document.createElement("p");
+  note.style.cssText = "color:#888;font-size:.8rem;margin-top:8px";
+  note.textContent =
+    "Expected: East/2023=300, East/2024=340, West/2023=450, West/2024=520, Grand Total=1610";
+  body.appendChild(note);
+
+  document.getElementById("suite").appendChild(card);
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  // Interactive UI demo
+  const demoData = makeDemoData(500);
+  createPivotUI(document.getElementById("pivot-ui-output"), demoData, {
+    rows:          ["Region"],
+    cols:          ["Year"],
+    aggregatorName:"Sum",
+    vals:          ["Revenue"],
+    rendererName:  "Table",
+  });
+
+  runAll();
+});
+</script>
+</body>
+</html>

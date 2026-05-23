@@ -1,7 +1,12 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/pivot.ts", "src/adapters/jquery.ts", "src/adapters/vanilla.ts"],
+  entry: [
+    "src/pivot.ts",
+    "src/adapters/jquery.ts",
+    "src/adapters/vanilla.ts",
+    "src/renderers/chartjs.ts",
+  ],
   format: ["cjs", "esm"],   // outputs pivot.js (CJS) and pivot.mjs (ESM)
   dts: true,
   sourcemap: true,

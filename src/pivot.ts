@@ -111,15 +111,16 @@ export function numberFormat(opts?: NumberFormatOptions): (x: any) => string {
     prefix: "",
     suffix: ""
   };
-  opts = Object.assign({}, defaults, opts);
+  // Merge into a fully-populated object so every field is defined.
+  const merged = Object.assign({}, defaults, opts) as Required<NumberFormatOptions>;
   return function(x: any): string {
     if (isNaN(x) || !isFinite(x)) return "";
     const result = addSeparators(
-      (opts.scaler * x).toFixed(opts.digitsAfterDecimal),
-      opts.thousandsSep,
-      opts.decimalSep
+      (merged.scaler * x).toFixed(merged.digitsAfterDecimal),
+      merged.thousandsSep,
+      merged.decimalSep
     );
-    return "" + opts.prefix + result + opts.suffix;
+    return "" + merged.prefix + result + merged.suffix;
   };
 }
 
@@ -463,21 +464,28 @@ export const derivers: Record<string, any> = {
     mthNames: string[] = mthNamesEn,
     dayNames: string[] = dayNamesEn
   ) {
-    const utc = utcOutput ? "UTC" : "";
     return function(record: any) {
       const date = new Date(Date.parse(record[col]));
       if (isNaN(date as any)) return "";
+      // Use explicit UTC vs local methods — avoids un-typed dynamic property access.
+      const yr  = utcOutput ? date.getUTCFullYear()  : date.getFullYear();
+      const mo  = utcOutput ? date.getUTCMonth()      : date.getMonth();
+      const dy  = utcOutput ? date.getUTCDate()       : date.getDate();
+      const dow = utcOutput ? date.getUTCDay()        : date.getDay();
+      const hr  = utcOutput ? date.getUTCHours()      : date.getHours();
+      const min = utcOutput ? date.getUTCMinutes()    : date.getMinutes();
+      const sec = utcOutput ? date.getUTCSeconds()    : date.getSeconds();
       return formatString.replace(/%(.)/g, function(_m: string, p: string) {
         switch (p) {
-          case "y": return date["get" + utc + "FullYear"]();
-          case "m": return zeroPad(date["get" + utc + "Month"]() + 1);
-          case "n": return mthNames[date["get" + utc + "Month"]()];
-          case "d": return zeroPad(date["get" + utc + "Date"]());
-          case "w": return dayNames[date["get" + utc + "Day"]()];
-          case "x": return date["get" + utc + "Day"]();
-          case "H": return zeroPad(date["get" + utc + "Hours"]());
-          case "M": return zeroPad(date["get" + utc + "Minutes"]());
-          case "S": return zeroPad(date["get" + utc + "Seconds"]());
+          case "y": return String(yr);
+          case "m": return zeroPad(mo + 1);
+          case "n": return mthNames[mo];
+          case "d": return zeroPad(dy);
+          case "w": return dayNames[dow];
+          case "x": return String(dow);
+          case "H": return zeroPad(hr);
+          case "M": return zeroPad(min);
+          case "S": return zeroPad(sec);
           default:  return "%" + p;
         }
       });
@@ -930,8 +938,15 @@ export class PivotStream implements PivotStreamInstance {
 // ─── Default table renderer ───────────────────────────────────────────────
 
 export function pivotTableRenderer(pivotData: PivotDataInstance, opts?: RendererOptions): HTMLTableElement {
-  const table         = Object.assign({ clickCallback: null, rowTotals: true, colTotals: true }, opts && opts.table);
-  const localeStrings = Object.assign({ totals: "Totals" }, opts && opts.localeStrings);
+  // Destructure with defaults — avoids Object.assign intersection inference
+  // collapsing clickCallback to `null` and breaking the null-check below.
+  const {
+    clickCallback = null,
+    rowTotals     = true,
+    colTotals     = true,
+  } = opts?.table ?? {};
+  const table = { clickCallback, rowTotals, colTotals };
+  const localeStrings = Object.assign({ totals: "Totals" }, opts?.localeStrings);
 
   const colAttrs = pivotData.colAttrs;
   const rowAttrs = pivotData.rowAttrs;
@@ -959,12 +974,10 @@ export function pivotTableRenderer(pivotData: PivotDataInstance, opts?: Renderer
     return len;
   }
 
-  const getClickHandler = table.clickCallback
-    ? function(value: any, rowValues: any[], colValues: any[]) {
-        const filters: Record<string, any> = {};
-        colAttrs.forEach((attr: string, i: number) => { if (colValues[i] != null) filters[attr] = colValues[i]; });
-        rowAttrs.forEach((attr: string, i: number) => { if (rowValues[i] != null) filters[attr] = rowValues[i]; });
-        return (e: Event) => table.clickCallback(e, value, filters, pivotData);
+  // clickCallback comes from the destructuring above — already non-null when truthy.
+  const getClickHandler = clickCallback
+    ? function(value: any, rowKey: string[], colKey: string[]) {
+        return (e: MouseEvent) => clickCallback(e, value, rowKey, colKey, pivotData);
       }
     : null;
 

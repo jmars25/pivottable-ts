@@ -1,0 +1,41 @@
+/*
+ * PivotTable — vanilla adapter CSS additions
+ *
+ * Load alongside the base pivot styles:
+ *   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css">
+ *   <link rel="stylesheet" href="dist/pivot.css">
+ *
+ * Or if using a bundler, import both:
+ *   import "pivottable/dist/pivot.min.css";   // base styles (from original package)
+ *   import "pivottable/dist/pivot.css";        // vanilla adapter additions
+ */
+
+/*
+ * SortableJS drag placeholder — pivot.css gives li.pvtPlaceholder a dashed
+ * border, but unlike jQuery UI's empty placeholder the SortableJS ghost
+ * still renders the span.pvtAttr text.  Hide it so only the outline shows,
+ * matching the original jQuery UI look.
+ */
+.pvtAxisContainer li.pvtPlaceholder span {
+  visibility: hidden;
+}
+
+/*
+ * Full-width pivot UI layout.
+ * The outer table (table.pvtUi) defaults to shrink-wrap width, which leaves
+ * chart renderers cramped.  These rules make the table stretch to fill its
+ * container and let td.pvtRendererArea absorb all remaining space so that
+ * canvas-based renderers (Chart.js, etc.) have room to breathe.
+ */
+table.pvtUi {
+  width: 100%;
+  table-layout: auto;
+}
+
+td.pvtRendererArea {
+  width: 100%;
+}
+
+td.pvtRendererArea > div {
+  width: 100% !important;
+}

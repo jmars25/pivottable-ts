@@ -11,7 +11,7 @@ import {
   pivotTableRenderer,
   renderers,
   sortAs
-} from "./chunk-SEBP56Q2.mjs";
+} from "./chunk-KOKACGAB.mjs";
 export {
   PivotData,
   PivotStream,

@@ -18,14 +18,20 @@
     "./vanilla": {
       "import": "./dist/adapters/vanilla.mjs",
       "require": "./dist/adapters/vanilla.js"
+    },
+    "./renderers/chartjs": {
+      "types":   "./dist/renderers/chartjs.d.ts",
+      "import":  "./dist/renderers/chartjs.mjs",
+      "require": "./dist/renderers/chartjs.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src/pivot.css"
   ],
   "style": "dist/pivot.css",
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node -e \"require('fs').copyFileSync('src/pivot.css','dist/pivot.css')\"",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit"
   },
@@ -49,14 +55,25 @@
   },
   "homepage": "https://github.com/jmars25/pivottable",
   "peerDependencies": {
-    "jquery": ">=1.9.0"
+    "chart.js": ">=4.0.0",
+    "jquery": ">=1.9.0",
+    "sortablejs": ">=1.15.0"
   },
   "peerDependenciesMeta": {
+    "chart.js": {
+      "optional": true
+    },
     "jquery": {
+      "optional": true
+    },
+    "sortablejs": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@types/sortablejs": "^1.15.9",
+    "chart.js": "^4.5.1",
+    "sortablejs": "^1.15.7",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3"
   }

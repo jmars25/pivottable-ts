@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PivotTable — Chart.js Renderers Test</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css">
+  <link rel="stylesheet" href="../dist/pivot.css">
+
+  <!--
+    Import map: resolve bare peer-dep specifiers in the browser.
+    sortablejs is needed by vanilla.mjs; chart.js by chartjs.mjs.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "sortablejs": "https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/+esm",
+      "chart.js":   "https://cdn.jsdelivr.net/npm/chart.js@4/+esm"
+    }
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; font-size: 14px; margin: 0; background: #f5f5f5; color: #222; }
+    h1  { margin: 0; font-size: 1.4rem; }
+    h2  { font-size: 1rem; margin: 0 0 8px; }
+
+    header {
+      background: #2c3e50; color: #fff;
+      padding: 12px 20px; display: flex; align-items: center; gap: 12px;
+    }
+
+    .container { width: 100%; padding: 20px; }
+
+    /* ── Interactive demo ── */
+    #demo-section { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 24px; margin-bottom: 28px; }
+    #demo-section h2 { font-size: 1.1rem; margin: 0 0 12px; }
+    #pivot-output { margin-top: 12px; }
+
+    /* Chart output: full width — pie charts manage their own tile sizing */
+    #pivot-output > div { width: 100% !important; }
+
+    /* ── Test runner ── */
+    #tests { list-style: none; padding: 0; margin: 0 0 24px; display: flex; flex-direction: column; gap: 6px; }
+    #tests li {
+      padding: 8px 12px; border-radius: 4px; font-size: 13px;
+      background: #fff; border: 1px solid #ddd;
+      display: flex; align-items: flex-start; gap: 8px;
+    }
+    #tests li.pass  { border-left: 4px solid #27ae60; }
+    #tests li.fail  { border-left: 4px solid #e74c3c; }
+    .badge { font-weight: bold; min-width: 40px; }
+    .pass .badge { color: #27ae60; }
+    .fail .badge { color: #e74c3c; }
+    .test-name { flex: 1; }
+    .test-msg  { font-size: 12px; color: #c0392b; margin-top: 4px; }
+
+    #summary {
+      padding: 10px 16px; border-radius: 6px; font-weight: bold;
+      margin-bottom: 20px; font-size: 14px;
+    }
+    #summary.all-pass { background: #d5f5e3; color: #196f3d; }
+    #summary.some-fail { background: #fadbd8; color: #922b21; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>PivotTable — Chart.js Renderers Test</h1>
+</header>
+
+<div class="container">
+  <div id="demo-section">
+    <h2>Interactive Demo — Chart.js Renderers</h2>
+    <p style="margin:0 0 12px;color:#555;font-size:13px;">
+      Use the dropdowns to switch between chart types.  Drag fields into rows/columns.
+    </p>
+    <div id="pivot-output"></div>
+  </div>
+
+  <ul id="tests"></ul>
+  <div id="summary"></div>
+</div>
+
+<script type="module">
+import { createPivotUI, pivotUtilities } from "../dist/adapters/vanilla.mjs";
+import { chartjsRenderers }              from "../dist/renderers/chartjs.mjs";
+
+// ─── Test harness ─────────────────────────────────────────────────────────
+
+const results = [];
+function assert(name, condition, msg = "") {
+  results.push({ name, pass: !!condition, msg: condition ? "" : (msg || "assertion failed") });
+}
+async function assertAsync(name, fn) {
+  try { await fn(); results.push({ name, pass: true, msg: "" }); }
+  catch(e) { results.push({ name, pass: false, msg: String(e) }); }
+}
+
+function renderResults() {
+  const ul  = document.getElementById("tests");
+  const sum = document.getElementById("summary");
+  let passed = 0;
+  for (const r of results) {
+    if (r.pass) passed++;
+    const li  = document.createElement("li");
+    li.className = r.pass ? "pass" : "fail";
+    li.innerHTML =
+      `<span class="badge">${r.pass ? "PASS" : "FAIL"}</span>` +
+      `<span class="test-name">${r.name}</span>` +
+      (r.msg ? `<div class="test-msg">${r.msg}</div>` : "");
+    ul.appendChild(li);
+  }
+  const failed = results.length - passed;
+  sum.textContent = `${passed} / ${results.length} passed${failed ? ` — ${failed} FAILED` : ""}`;
+  sum.className   = failed ? "some-fail" : "all-pass";
+}
+
+// ─── Minimal PivotData ──────────────────────────────────────────────────────
+
+const sampleData = [
+  { Region: "North", Product: "Widget", Sales: 120, Qty: 5 },
+  { Region: "North", Product: "Gadget", Sales: 200, Qty: 8 },
+  { Region: "South", Product: "Widget", Sales:  90, Qty: 3 },
+  { Region: "South", Product: "Gadget", Sales: 310, Qty: 12 },
+  { Region: "East",  Product: "Widget", Sales: 150, Qty: 6 },
+  { Region: "East",  Product: "Gadget", Sales: 250, Qty: 9 },
+];
+
+function makePivotData(rows = ["Region"], cols = ["Product"]) {
+  return new pivotUtilities.PivotData(sampleData, {
+    rows, cols,
+    aggregator: pivotUtilities.aggregators["Sum"]([  "Sales"]),
+  });
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────
+
+// 1. chartjsRenderers is exported and has expected keys
+assert(
+  "chartjsRenderers is an object",
+  typeof chartjsRenderers === "object" && chartjsRenderers !== null,
+);
+
+const EXPECTED_KEYS = [
+  "Bar Chart", "Stacked Bar Chart", "Horizontal Bar Chart",
+  "Line Chart", "Area Chart", "Scatter Chart", "Multiple Pie Chart",
+];
+for (const key of EXPECTED_KEYS) {
+  assert(
+    `chartjsRenderers["${key}"] is a function`,
+    typeof chartjsRenderers[key] === "function",
+  );
+}
+
+// 2. Each renderer returns an HTMLElement when called with real PivotData
+const pd = makePivotData();
+for (const [name, renderer] of Object.entries(chartjsRenderers)) {
+  let el;
+  try { el = renderer(pd); } catch(e) { el = null; }
+  assert(
+    `"${name}" returns HTMLElement`,
+    el instanceof HTMLElement,
+    el == null ? "threw an exception" : `got ${el?.constructor?.name}`,
+  );
+}
+
+// 3. Bar Chart: contains a <canvas>
+{
+  const el = chartjsRenderers["Bar Chart"](pd);
+  assert(
+    "Bar Chart output contains a <canvas>",
+    el.querySelector("canvas") !== null,
+  );
+}
+
+// 4. Multiple Pie Chart: contains one <canvas> per rowKey
+{
+  const el = chartjsRenderers["Multiple Pie Chart"](pd);
+  const canvases = el.querySelectorAll("canvas");
+  const rowCount = pd.getRowKeys().length;
+  assert(
+    `Multiple Pie Chart contains ${rowCount} canvases (one per row key)`,
+    canvases.length === rowCount,
+    `found ${canvases.length}, expected ${rowCount}`,
+  );
+}
+
+// 5. No-data case returns a div (not a canvas)
+{
+  const emptyPd = new pivotUtilities.PivotData([], {
+    rows: ["Region"], cols: ["Product"],
+    aggregator: pivotUtilities.aggregators["Sum"](["Sales"]),
+  });
+  const el = chartjsRenderers["Bar Chart"](emptyPd);
+  assert(
+    "Bar Chart with no data returns a <div> (no crash)",
+    el.tagName === "DIV",
+  );
+}
+
+// 6. Scatter Chart handles non-numeric colKey gracefully
+{
+  const pdScatter = makePivotData(["Region"], ["Product"]);
+  let el, threw = false;
+  try { el = pdScatter && chartjsRenderers["Scatter Chart"](pdScatter); }
+  catch(e) { threw = true; }
+  assert("Scatter Chart with string colKeys does not throw", !threw);
+}
+
+// 7. chartjsRenderers can be merged with pivotUtilities.renderers
+{
+  const merged = { ...pivotUtilities.renderers, ...chartjsRenderers };
+  assert(
+    "Merged renderers has both Table and Bar Chart",
+    typeof merged["Table"] === "function" &&
+    typeof merged["Bar Chart"] === "function",
+  );
+}
+
+renderResults();
+
+// ─── Interactive Demo ───────────────────────────────────────────────────────
+
+// Build 500-row dataset (same as vanilla_test for easy comparison)
+function randomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+const regions   = ["North","South","East","West","Central"];
+const products  = ["Widget","Gadget","Doohickey","Thingamajig","Whatchamacallit"];
+const years     = [2021,2022,2023,2024];
+const bigData = [];
+for (let i = 0; i < 500; i++) {
+  bigData.push({
+    Region:  regions[randomInt(0,4)],
+    Product: products[randomInt(0,4)],
+    Year:    years[randomInt(0,3)],
+    Sales:   randomInt(50,500),
+    Qty:     randomInt(1,20),
+  });
+}
+
+const allRenderers = {
+  ...pivotUtilities.renderers,
+  ...chartjsRenderers,
+};
+
+createPivotUI(
+  document.getElementById("pivot-output"),
+  bigData,
+  {
+    rows:     ["Region"],
+    cols:     ["Product"],
+    renderer: chartjsRenderers["Bar Chart"],
+    renderers: allRenderers,
+    rendererName: "Bar Chart",
+  },
+);
+</script>
+</body>
+</html>
