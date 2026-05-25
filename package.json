@@ -1,7 +1,7 @@
 {
-  "name": "pivottable",
-  "version": "2.23.0",
-  "description": "Javascript Pivot Table (aka Pivot Grid, Pivot Chart, Cross-Tab) implementation with drag'n'drop",
+  "name": "pivottable-ts",
+  "version": "1.0.0",
+  "description": "TypeScript pivot table with drag-and-drop, vanilla adapter, Chart.js renderers and 15-language locale support",
   "main": "dist/pivot.js",
   "module": "dist/pivot.mjs",
   "types": "dist/pivot.d.ts",
@@ -11,12 +11,9 @@
       "import": "./dist/pivot.mjs",
       "require": "./dist/pivot.js"
     },
-    "./jquery": {
-      "import": "./dist/adapters/jquery.mjs",
-      "require": "./dist/adapters/jquery.js"
-    },
     "./vanilla": {
-      "import": "./dist/adapters/vanilla.mjs",
+      "types":   "./dist/adapters/vanilla.d.ts",
+      "import":  "./dist/adapters/vanilla.mjs",
       "require": "./dist/adapters/vanilla.js"
     },
     "./renderers/chartjs": {
@@ -28,15 +25,19 @@
       "types":   "./dist/locales/index.d.ts",
       "import":  "./dist/locales/index.mjs",
       "require": "./dist/locales/index.js"
-    }
+    },
+    "./dist/pivot.css":   "./dist/pivot.css",
+    "./dist/pivot.min.js": "./dist/pivot.min.js"
   },
   "files": [
-    "dist",
-    "src/pivot.css"
+    "dist"
   ],
   "style": "dist/pivot.css",
+  "unpkg": "dist/pivot.min.js",
+  "jsdelivr": "dist/pivot.min.js",
   "scripts": {
     "build": "tsup && node -e \"require('fs').copyFileSync('src/pivot.css','dist/pivot.css')\"",
+    "prepare": "npm run build",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit"
   },
@@ -47,38 +48,36 @@
     "table",
     "pivottable",
     "pivotgrid",
-    "pivotchart"
+    "pivotchart",
+    "typescript"
   ],
   "repository": {
     "type": "git",
-    "url": "git://github.com/jmars25/pivottable.git"
+    "url": "https://github.com/jmars25/pivottable.git"
   },
-  "author": "Nicolas Kruchten",
+  "author": "jmars25",
+  "contributors": [
+    "Nicolas Kruchten (original pivottable author, https://github.com/nicolaskruchten/pivottable)"
+  ],
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/jmars25/pivottable/issues"
   },
   "homepage": "https://github.com/jmars25/pivottable",
+  "dependencies": {
+    "sortablejs": "^1.15.7"
+  },
   "peerDependencies": {
-    "chart.js": ">=4.0.0",
-    "jquery": ">=1.9.0",
-    "sortablejs": ">=1.15.0"
+    "chart.js": ">=4.0.0"
   },
   "peerDependenciesMeta": {
     "chart.js": {
-      "optional": true
-    },
-    "jquery": {
-      "optional": true
-    },
-    "sortablejs": {
       "optional": true
     }
   },
   "devDependencies": {
     "@types/sortablejs": "^1.15.9",
     "chart.js": "^4.5.1",
-    "sortablejs": "^1.15.7",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3"
   }

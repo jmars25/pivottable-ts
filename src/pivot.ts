@@ -1,7 +1,6 @@
 /*
- * PivotTable — core data layer.  Zero jQuery dependency.
- * jQuery UI adapter ($.fn.pivot, $.fn.pivotUI, etc.) lives in
- * src/adapters/jquery.ts and is built to dist/adapters/jquery.js.
+ * pivottable-ts — core data layer.  Zero external dependencies.
+ * Vanilla adapter (createPivot / createPivotUI) lives in src/adapters/vanilla.ts.
  */
 
 
@@ -78,7 +77,7 @@ export interface RendererOptions {
 }
 
 export interface PivotStreamOptions {
-  onComplete?: (error: null, count: number, stream: PivotStreamInstance) => void;
+  onComplete?: (error: Error | null, count: number, stream: PivotStreamInstance) => void;
 }
 
 export interface PivotStreamInstance {
@@ -494,8 +493,8 @@ export const derivers: Record<string, any> = {
 };
 
 // ─── Locale ───────────────────────────────────────────────────────────────
-// renderers are populated by src/adapters/jquery.ts; the plain "Table"
-// renderer is added below after pivotTableRenderer is defined.
+// The plain "Table" renderer is added below after pivotTableRenderer is defined.
+// Additional renderers (heatmap, barchart, chart.js) are added by the adapters.
 
 export const locales: Record<string, any> = {
   en: {
@@ -823,8 +822,8 @@ export class PivotData implements PivotDataInstance {
 
 export class PivotStream implements PivotStreamInstance {
 
-  // Called when done() is invoked — receives (null, recordCount, stream)
-  onComplete: (error: null, count: number, stream: PivotStreamInstance) => void;
+  // Called when done() is invoked — receives (null, recordCount, stream), or (Error, 0, stream) on failure
+  onComplete: (error: Error | null, count: number, stream: PivotStreamInstance) => void;
 
   private _count:       number;
   private _colsInit:    boolean;
@@ -915,7 +914,7 @@ export class PivotStream implements PivotStreamInstance {
           if (done) {
             buffer.split("\n").forEach(line => {
               if (line.trim().length > 0) {
-                try { this.push(JSON.parse(line)); } catch(e) {}
+                try { this.push(JSON.parse(line)); } catch (_e) {}
               }
             });
             this.done();
@@ -925,9 +924,13 @@ export class PivotStream implements PivotStreamInstance {
           const lines = buffer.split("\n");
           buffer = lines.pop()!;
           lines.forEach(line => {
-            if (line.trim().length > 0) this.push(JSON.parse(line));
+            if (line.trim().length > 0) {
+              try { this.push(JSON.parse(line)); } catch (_e) {}
+            }
           });
           return pump();
+        }).catch(err => {
+          this.onComplete(err instanceof Error ? err : new Error(String(err)), this._count, this);
         });
       };
       return pump();
@@ -1132,8 +1135,8 @@ export function pivotTableRenderer(pivotData: PivotDataInstance, opts?: Renderer
   return result;
 }
 
-// ─── Renderers (plain, no jQuery) ────────────────────────────────────────
-// The jQuery adapter adds "Table Barchart", "Heatmap" etc.
+// ─── Renderers (core) ────────────────────────────────────────────────────
+// The vanilla adapter adds "Table Barchart", "Heatmap", and drag-and-drop UI.
 
 export const renderers: Record<string, any> = {
   "Table": pivotTableRenderer

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PivotTable — React Demo</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css">
+  <link rel="stylesheet" href="../dist/pivot.css">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "react":            "https://esm.sh/react@18",
+      "react-dom/client": "https://esm.sh/react-dom@18/client",
+      "htm":              "https://esm.sh/htm",
+      "sortablejs":       "https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/+esm",
+      "chart.js":         "https://cdn.jsdelivr.net/npm/chart.js@4/+esm"
+    }
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      margin: 0;
+      background: #f0f2f5;
+      color: #222;
+    }
+
+    header {
+      background: #20232a;
+      color: #61dafb;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header .react-logo {
+      font-size: 1.6rem;
+      animation: spin 8s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    header h1   { margin: 0; font-size: 1.2rem; color: #fff; }
+    header span { font-size: 0.8rem; opacity: 0.8; }
+
+    .page { padding: 20px; }
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.12);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #888;
+      margin: 0 0 14px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: flex-end;
+    }
+    .control-group { display: flex; flex-direction: column; gap: 4px; }
+    .control-group label { font-size: 12px; font-weight: 600; color: #555; }
+    .control-group select {
+      padding: 5px 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .range-row { display: flex; align-items: center; gap: 8px; }
+    .range-badge {
+      background: #20232a; color: #61dafb;
+      border-radius: 4px; padding: 2px 8px;
+      font-size: 12px; font-weight: bold; min-width: 48px; text-align: center;
+    }
+
+    .btn {
+      padding: 6px 16px; border: none; border-radius: 4px;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .btn-mount   { background: #27ae60; color: #fff; }
+    .btn-unmount { background: #e74c3c; color: #fff; }
+
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 600;
+    }
+    .status-pill.mounted   { background: #d5f5e3; color: #196f3d; }
+    .status-pill.unmounted { background: #fadbd8; color: #922b21; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .mounted   .status-dot { background: #27ae60; }
+    .unmounted .status-dot { background: #e74c3c; }
+
+    .empty-state {
+      padding: 40px 0; text-align: center;
+      color: #aaa; font-size: 13px;
+    }
+
+    .code-block {
+      background: #1e1e2e; color: #cdd6f4;
+      border-radius: 6px; padding: 16px 18px;
+      font-family: "Fira Code", "Cascadia Code", monospace;
+      font-size: 12.5px; line-height: 1.6;
+      overflow-x: auto; tab-size: 2; white-space: pre;
+    }
+    .kw  { color: #cba6f7; }
+    .fn  { color: #89b4fa; }
+    .str { color: #a6e3a1; }
+    .cm  { color: #6c7086; }
+  </style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script type="module">
+import { useState, useEffect, useRef, useMemo, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import htm from "htm";
+const html = htm.bind(createElement);
+import { createPivotUI, pivotUtilities } from "../dist/adapters/vanilla.mjs";
+import { chartjsRenderers }              from "../dist/renderers/chartjs.mjs";
+import { locales }                       from "../dist/locales/index.mjs";
+
+// ─── Renderers ────────────────────────────────────────────────────────────────
+
+const allRenderers = { ...pivotUtilities.renderers, ...chartjsRenderers };
+
+// ─── Data ────────────────────────────────────────────────────────────────────
+
+function makeData(n) {
+  const regions  = ["North","South","East","West","Central"];
+  const products = ["Widget","Gadget","Doohickey","Thingamajig","Whatchamacallit"];
+  const years    = [2021,2022,2023,2024];
+  const ri = (a,b) => Math.floor(Math.random()*(b-a+1))+a;
+  return Array.from({ length: n }, () => ({
+    Region:  regions[ri(0,4)],
+    Product: products[ri(0,4)],
+    Year:    years[ri(0,3)],
+    Sales:   ri(50,500),
+    Qty:     ri(1,20),
+  }));
+}
+
+// ─── usePivotUI hook ─────────────────────────────────────────────────────────
+
+function usePivotUI(data, opts, locale) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const handle = createPivotUI(el, data, opts, true, locale);
+    return () => handle.destroy();
+  }, [locale]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return ref;
+}
+
+// ─── PivotTable component ─────────────────────────────────────────────────────
+
+function PivotTable({ data, locale, rendererName, rows, cols }) {
+  const opts = useMemo(() => ({
+    renderers: allRenderers,
+    rendererName,
+    rows,
+    cols,
+    vals: ["Sales"],
+  }), [rendererName, rows, cols]);
+
+  const ref = usePivotUI(data, opts, locale);
+  return html`<div ref=${ref} style=${{ width: "100%" }} />`;
+}
+
+// ─── App ─────────────────────────────────────────────────────────────────────
+
+const LOCALES = [
+  { code:"en", label:"🇬🇧 English"    },
+  { code:"de", label:"🇩🇪 Deutsch"    },
+  { code:"fr", label:"🇫🇷 Français"   },
+  { code:"es", label:"🇪🇸 Español"    },
+  { code:"it", label:"🇮🇹 Italiano"   },
+  { code:"pt", label:"🇧🇷 Português"  },
+  { code:"nl", label:"🇳🇱 Nederlands" },
+  { code:"pl", label:"🇵🇱 Polski"     },
+  { code:"cs", label:"🇨🇿 Čeština"   },
+  { code:"da", label:"🇩🇰 Dansk"      },
+  { code:"ru", label:"🇷🇺 Русский"    },
+  { code:"ja", label:"🇯🇵 日本語"      },
+  { code:"zh", label:"🇨🇳 中文"        },
+  { code:"tr", label:"🇹🇷 Türkçe"     },
+  { code:"sq", label:"🇦🇱 Shqip"      },
+];
+
+function App() {
+  const [locale,       setLocale]       = useState("en");
+  const [rowCount,     setRowCount]     = useState(500);
+  const [mounted,      setMounted]      = useState(true);
+  const [rendererName, setRendererName] = useState("Bar Chart");
+
+  const data = useMemo(() => makeData(rowCount), [rowCount]);
+  const localeLabel = LOCALES.find(l => l.code === locale)?.label ?? locale;
+
+  return html`
+    <header>
+      <span class="react-logo">⚛</span>
+      <div>
+        <h1>PivotTable + React</h1>
+        <span>vanilla adapter · Chart.js renderers · locale switching</span>
+      </div>
+    </header>
+
+    <div class="page">
+
+      <div class="card">
+        <p class="card-title">Controls</p>
+        <div class="controls">
+
+          <div class="control-group">
+            <label>Locale</label>
+            <select value=${locale} onChange=${e => setLocale(e.target.value)}>
+              ${LOCALES.map(l => html`
+                <option key=${l.code} value=${l.code}>${l.label}</option>
+              `)}
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Default renderer</label>
+            <select value=${rendererName} onChange=${e => setRendererName(e.target.value)}>
+              ${Object.keys(allRenderers).map(name => html`
+                <option key=${name} value=${name}>${name}</option>
+              `)}
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label>Row count</label>
+            <div class="range-row">
+              <input type="range" min="50" max="2000" step="50"
+                value=${rowCount}
+                onInput=${e => setRowCount(Number(e.target.value))}
+              />
+              <span class="range-badge">${rowCount}</span>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>Component</label>
+            <div style=${{ display:"flex", gap:8 }}>
+              <button class="btn btn-mount"
+                onClick=${() => setMounted(true)}
+                disabled=${mounted}>Mount</button>
+              <button class="btn btn-unmount"
+                onClick=${() => setMounted(false)}
+                disabled=${!mounted}>Unmount</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>Status</label>
+            <span class=${"status-pill " + (mounted ? "mounted" : "unmounted")}>
+              <span class="status-dot"></span>
+              ${mounted ? "Mounted" : "Unmounted"}
+            </span>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="card-title">PivotTable — ${localeLabel}</p>
+        ${mounted
+          ? html`<${PivotTable}
+              data=${data}
+              locale=${locale}
+              rendererName=${rendererName}
+              rows=${["Region"]}
+              cols=${["Product"]}
+            />`
+          : html`<div class="empty-state">
+              Component unmounted — click <strong>Mount</strong> to restore.
+            </div>`
+        }
+      </div>
+
+      <div class="card">
+        <p class="card-title">How it works</p>
+        <div class="code-block"><span class="cm">// usePivotUI — the whole React integration in ~10 lines</span>
+<span class="kw">function</span> <span class="fn">usePivotUI</span>(data, opts, locale) {
+  <span class="kw">const</span> ref = <span class="fn">useRef</span>(<span class="kw">null</span>);
+
+  <span class="fn">useEffect</span>(() => {
+    <span class="kw">const</span> handle = <span class="fn">createPivotUI</span>(ref.current, data, opts, <span class="kw">true</span>, locale);
+    <span class="kw">return</span> () => handle.<span class="fn">destroy</span>(); <span class="cm">// ← cleans up on unmount / locale change</span>
+  }, [locale]);
+
+  <span class="kw">return</span> ref;
+}
+
+<span class="cm">// PivotTable component</span>
+<span class="kw">function</span> <span class="fn">PivotTable</span>({ data, locale, rendererName }) {
+  <span class="kw">const</span> opts = <span class="fn">useMemo</span>(() => ({ renderers, rendererName, rows, cols }), [...]);
+  <span class="kw">const</span> ref  = <span class="fn">usePivotUI</span>(data, opts, locale);
+  <span class="kw">return</span> html&#96;&lt;div ref=${ref} /&gt;&#96;;
+}
+
+<span class="cm">// Locale switching — side-effectful import registers all 14 locales</span>
+<span class="kw">import</span> <span class="str">"pivottable/locales"</span>;
+<span class="fn">createPivotUI</span>(el, data, opts, <span class="kw">false</span>, <span class="str">"de"</span>); <span class="cm">// → German UI</span></div>
+      </div>
+
+    </div>
+  `;
+}
+
+createRoot(document.getElementById("app")).render(html`<${App} />`);
+</script>
+
+</body>
+</html>

@@ -1,17 +1,87 @@
-## Issues
+# Contributing to pivottable-ts
 
-[Issues](https://github.com/nicolaskruchten/pivottable/issues/new) are the preferred way to communicate with the author and users of PivotTable.js, rather than private email.
+Thank you for your interest in contributing!
 
-* Please read this repo's [guidelines regarding issues](https://github.com/nicolaskruchten/pivottable/blob/master/SUPPORT.md).
+## Project overview
 
-## Pull Requests
+`pivottable-ts` is a standalone TypeScript pivot table library, forked from the original [pivottable](https://github.com/nicolaskruchten/pivottable) and significantly extended.
+The CoffeeScript/jQuery/Gulp stack has been replaced entirely with TypeScript, tsup, and a framework-agnostic vanilla adapter built on SortableJS.
 
-[Pull requests](https://help.github.com/articles/using-pull-requests) to this project are very welcome! They are most likely to be merged in if they conform to this project's basic goals, scope and structure:
+Key additions over the original:
 
-* If accepted, you agree that your pull-requests will be released to the world under the same license as the rest of the code: the [MIT license](LICENSE.md).
-* It's probably best to [log an issue](https://github.com/nicolaskruchten/pivottable/issues/new) to report a bug or ask how something was meant to be done before jumping in and modifying the code, if only to confirm that there isn't another way to do what you're aiming for, and to increase the odds that your pull request will be merged :)
-* Multiple small pull requests which aim to solve clearly-stated problems are preferable to large pull requests which make many unrelated changes
-* The code for this project is written in CoffeeScript and thereafter compiled to Javascript, so it would be best to submit modifications to the CoffeeScript source files rather than to the automatically-generated Javascript source files (please reach out if you've made some neat modifications to the Javascript and want help 'porting' back up to the CoffeeScript version).
-  * Releases for this project are built using the Gulp build system, and the resulting build products (located under `dist`) are tested with the Jasmine test suite under `tests`. See the building/test section of the main [ReadMe](https://github.com/nicolaskruchten/pivottable/blob/master/ReadMe.md) for details.
-* The aim of this project is to have an extensible core component that fits into a single smallish file ([pivot.coffee](https://github.com/nicolaskruchten/pivottable/blob/master/src/pivot.coffee)), which depends only on the jQuery and jQueryUI core. If you want to submit changes which depend on other libraries, please submit them as separate 'plugin' files like the Google Chart or D3 renderers.
-* This is a cross-browser, client-side library with very little (if any) browser-specific shim code, so please try to submit modifications that work with as many browsers as possible and which don't require any server-side components
+- **Columnar input** — pass data as typed arrays (`Uint16Array` / `Float64Array`) with optional dictionary encoding instead of an array of row objects. Dramatically faster for large datasets since no per-row object allocation or property lookup is needed.
+- **Streaming input** (`PivotStream`) — feed records incrementally (e.g. from a CSV stream or WebSocket), calling `.push()` per record and `.done()` when finished. Internally accumulates into columnar format so the final pivot runs on the fast path.
+- **Chart.js renderers** — built-in bar, stacked bar, horizontal bar, line, area, scatter and multiple-pie charts via Chart.js v4, replacing the old optional D3/C3/Google Charts renderers.
+- **15 locales** — all translations ported to TypeScript and tree-shakeable; register only what you need.
+- **Framework demos** — working React 18 and Vue 3 integration examples using the vanilla adapter.
+
+## Tech stack
+
+| Tool | Purpose |
+|---|---|
+| **TypeScript** | All source code under `src/` |
+| **tsup** | Builds CJS + ESM bundles + `.d.ts` declarations |
+| **Vite** | Dev server for the React and Vue example apps |
+| **SortableJS** | Drag-and-drop in the vanilla adapter (direct dependency, bundled automatically) |
+| **Chart.js** | Optional chart renderers (`src/renderers/chartjs.ts`) |
+
+## Repository layout
+
+```
+src/
+  pivot.ts               # Core pivot engine + type definitions
+  pivot.css              # Complete stylesheet (base + vanilla adapter additions)
+  adapters/
+    vanilla.ts           # Framework-agnostic adapter (createPivot / createPivotUI)
+  renderers/
+    chartjs.ts           # Chart.js renderer set
+  locales/
+    index.ts             # All 15 locale translations registered as side effects
+examples/
+  react-demo/            # Vite + React 18 demo (port 5178)
+  vue-demo/              # Vite + Vue 3 demo (port 5179)
+  *.html                 # Static HTML examples (no build step)
+```
+
+## Getting started
+
+```bash
+# Install root dependencies
+npm install
+
+# Build the library (outputs to dist/)
+npm run build
+
+# Watch mode for library development
+npm run dev
+
+# Type-check only (no emit)
+npm run typecheck
+```
+
+## Running the example apps
+
+Both demos depend on the local package via `"pivottable-ts": "file:../.."`.
+Run `npm install` once inside each demo directory, then:
+
+```bash
+# React demo — http://localhost:5178
+npm --prefix examples/react-demo run dev
+
+# Vue demo — http://localhost:5179
+npm --prefix examples/vue-demo run dev
+```
+
+## Making changes
+
+1. Edit files under `src/`.
+2. Run `npm run build` (or keep `npm run dev` running in watch mode).
+3. The example apps pick up changes via the local file junction automatically.
+4. Run `npm run typecheck` before opening a PR.
+
+## Pull requests
+
+- Keep PRs focused — one feature or fix per PR.
+- If you add a renderer or adapter, add a corresponding entry to the `exports` map in `package.json`.
+- CSS changes should go in `src/pivot.css` (it ships as `dist/pivot.css`).
+- Please do not commit the `dist/` folder — it is generated by `npm run build`.

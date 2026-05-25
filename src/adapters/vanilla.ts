@@ -2,9 +2,9 @@
  * Vanilla JS adapter — zero jQuery dependency.
  *
  * Exports:
- *   createPivot()    — static pivot table renderer  (replaces $.fn.pivot)
- *   createPivotUI()  — full drag-and-drop UI        (replaces $.fn.pivotUI)
- *   pivotUtilities   — namespace object             (replaces $.pivotUtilities)
+ *   createPivot()    — static pivot table renderer
+ *   createPivotUI()  — full drag-and-drop UI
+ *   pivotUtilities   — aggregators, renderers, formatters and sort helpers
  */
 
 import Sortable from "sortablejs";
@@ -36,7 +36,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string): HTMLEl
   return node;
 }
 
-// Deep-merge plain objects — same logic as jquery.ts.
+// Deep-merge plain objects.
 // Will move to src/utils.ts once there are 3+ consumers.
 function deepMerge(...sources: Record<string, any>[]): Record<string, any> {
   const result: Record<string, any> = {};
@@ -135,7 +135,7 @@ export interface PivotUIOptions extends PivotOptions {
   showUI?:                boolean;
 }
 
-// State map — replaces jQuery's .data("pivotUIOptions") on the element.
+// State map — keyed on the container element, stores last-used options.
 // WeakMap means the stored state is garbage-collected when the element is removed.
 const uiState = new WeakMap<HTMLElement, PivotUIOptions>();
 
@@ -149,7 +149,7 @@ export interface PivotUIHandle {
 }
 
 // ─── Heatmap post-processor ───────────────────────────────────────────────
-// Vanilla equivalent of $.fn.heatmap().
+// Heatmap renderer.
 // Takes the <table> element returned by pivotTableRenderer and colorizes cells
 // by value.  Returns the same element so it can be used inline as a renderer.
 
@@ -205,7 +205,7 @@ export function heatmap(
 }
 
 // ─── Barchart post-processor ──────────────────────────────────────────────
-// Vanilla equivalent of $.fn.barchart().
+// Barchart renderer.
 // Replaces each data cell's text with a proportional bar + label.
 
 export function barchart(table: HTMLElement): HTMLElement {
@@ -264,7 +264,7 @@ export function barchart(table: HTMLElement): HTMLElement {
 }
 
 // ─── Vanilla renderer set ─────────────────────────────────────────────────
-// Drop-in equivalents of the jQuery-only "Table Barchart" / Heatmap renderers.
+// "Table Barchart" and Heatmap renderers — included in the default renderers map.
 // Each is a standard renderer function: (pivotData, opts?) → HTMLElement.
 
 export const vanillaRenderers: Record<string, (data: PivotDataInstance, opts?: any) => HTMLElement> = {
@@ -414,7 +414,7 @@ export function createPivotUI(
               filter.startsWith("<=") ? acceptGen("<=", [-1, 0]) :
               filter.startsWith(">")  ? acceptGen(">",  [1])     :
               filter.startsWith("<")  ? acceptGen("<",  [-1])    :
-              filter.startsWith("~")  ? (v) => filter.length <= 1 || !!v.toLowerCase().match(filter.slice(1)) :
+              filter.startsWith("~")  ? (v) => { if (filter.length <= 1) return true; try { return !!v.toLowerCase().match(filter.slice(1)); } catch { return false; } } :
                                         (v) => v.toLowerCase().includes(filter);
 
             filterBox.querySelectorAll<HTMLElement>(".pvtCheckContainer p").forEach(p => {
@@ -759,9 +759,12 @@ export function createPivotUI(
       opts.onRefresh?.(savedState);
     };
 
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
     const refresh = () => {
       pivotTableCell.style.opacity = "0.5";
-      setTimeout(refreshDelayed, 10);
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refreshDelayed, 10);
     };
 
     aggregatorSelect.addEventListener("change", refresh);
@@ -770,7 +773,7 @@ export function createPivotUI(
     // ── 9. Drag-and-drop (SortableJS) ─────────────────────────────────────
     // One Sortable instance per axis container (rows, cols, unused).
     // Shared group name means items can be dragged freely between all three.
-    // onEnd fires once per drop — no need for a sender-check like jQuery UI.
+    // onEnd fires once per drop — no need for a sender-check like older drag libs.
 
     const sortables: Sortable[] = [];
     container.querySelectorAll<HTMLElement>(".pvtAxisContainer").forEach(axisEl => {
@@ -789,6 +792,7 @@ export function createPivotUI(
 
     return {
       destroy() {
+        if (refreshTimer !== null) { clearTimeout(refreshTimer); refreshTimer = null; }
         sortables.forEach(s => s.destroy());
         container.innerHTML = "";
         uiState.delete(container);
@@ -803,7 +807,7 @@ export function createPivotUI(
 }
 
 // ─── pivotUtilities ───────────────────────────────────────────────────────
-// Mirrors $.pivotUtilities — all core exports in one namespace.
+// All core exports in one namespace — convenience re-export.
 
 export const pivotUtilities = {
   aggregatorTemplates,

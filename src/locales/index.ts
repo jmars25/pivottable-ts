@@ -2,14 +2,14 @@
  * PivotTable locale pack — all 14 built-in translations.
  *
  * Side-effectful import: registers locales on the shared `locales` map so
- * that createPivotUI / $.fn.pivotUI pick them up via the `locale` option.
+ * that createPivotUI picks them up via the `locale` option.
  *
  * Usage:
- *   import "pivottable/locales";                 // register all locales
- *   createPivotUI(el, data, { locale: "de" });   // use German
+ *   import "pivottable-ts/locales";                 // register all locales
+ *   createPivotUI(el, data, { locale: "de" });      // use German
  *
  * Or import the map directly:
- *   import { locales } from "pivottable/locales";
+ *   import { locales } from "pivottable-ts/locales";
  *   createPivotUI(el, data, { locale: "fr", renderers: locales.fr.renderers });
  *
  * Included locales: cs da de es fr it ja nl pl pt ru sq tr zh

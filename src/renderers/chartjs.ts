@@ -2,18 +2,14 @@
  * Chart.js renderers for PivotTable.
  *
  * Provides 7 renderers that return canvas-based charts instead of <table>
- * elements.  Pass them via the `renderers` option of createPivotUI / $.fn.pivotUI.
+ * elements.  Pass them via the `renderers` option of createPivotUI.
  *
  * Peer dependency: chart.js >= 4.0.0
  *   npm install chart.js
  *
- * Usage (vanilla):
- *   import { chartjsRenderers } from "pivottable/renderers/chartjs";
+ * Usage:
+ *   import { chartjsRenderers } from "pivottable-ts/renderers/chartjs";
  *   createPivotUI(el, data, { renderers: chartjsRenderers });
- *
- * Usage (jQuery):
- *   import { chartjsRenderers } from "pivottable/renderers/chartjs";
- *   $(el).pivotUI(data, { renderers: chartjsRenderers });
  *
  * Renderers exported:
  *   "Bar Chart"            – colKeys on x-axis, rowKeys as series
@@ -284,7 +280,7 @@ function multiplePieRenderer(
  * createPivotUI(el, data, { renderers: chartjsRenderers });
  *
  * @example  // merge with table renderers
- * import { pivotUtilities } from "pivottable/vanilla";
+ * import { pivotUtilities } from "pivottable-ts/vanilla";
  * createPivotUI(el, data, {
  *   renderers: { ...pivotUtilities.renderers, ...chartjsRenderers },
  * });

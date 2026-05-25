@@ -1,31 +1,150 @@
-/*
- * PivotTable — vanilla adapter CSS additions
+/* =============================================================================
+ * PivotTable.js — complete stylesheet
  *
- * Load alongside the base pivot styles:
- *   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css">
- *   <link rel="stylesheet" href="dist/pivot.css">
+ * Includes the original base styles (formerly pivot.min.css) plus additions
+ * for the vanilla/SortableJS adapter.  A single import is all that's needed:
  *
- * Or if using a bundler, import both:
- *   import "pivottable/dist/pivot.min.css";   // base styles (from original package)
- *   import "pivottable/dist/pivot.css";        // vanilla adapter additions
- */
+ *   import "pivottable/dist/pivot.css";
+ * ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+ * Base styles (ported from the original pivot.min.css)
+ * ----------------------------------------------------------------------------- */
+
+.pvtUi { color: #333; }
+
+table.pvtTable {
+  font-size: 8pt;
+  text-align: left;
+  border-collapse: collapse;
+}
+
+table.pvtTable tbody tr th,
+table.pvtTable thead tr th {
+  background-color: #e6EEEE;
+  border: 1px solid #CDCDCD;
+  font-size: 8pt;
+  padding: 5px;
+}
+
+table.pvtTable .pvtColLabel  { text-align: center; }
+table.pvtTable .pvtTotalLabel { text-align: right; }
+
+table.pvtTable tbody tr td {
+  color: #3D3D3D;
+  padding: 5px;
+  background-color: #FFF;
+  border: 1px solid #CDCDCD;
+  vertical-align: top;
+  text-align: right;
+}
+
+.pvtGrandTotal,
+.pvtTotal { font-weight: 700; }
+
+.pvtVals {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.pvtColOrder,
+.pvtRowOrder {
+  cursor: pointer;
+  width: 15px;
+  margin-left: 5px;
+  display: inline-block;
+}
+
+.pvtAggregator { margin-bottom: 5px; }
+
+.pvtAxisContainer,
+.pvtVals {
+  border: 1px solid gray;
+  background: #EEE;
+  padding: 5px;
+  min-width: 20px;
+  min-height: 20px;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.pvtAxisContainer li {
+  padding: 8px 6px;
+  list-style-type: none;
+  cursor: move;
+}
+
+.pvtAxisContainer li.pvtPlaceholder {
+  border-radius: 5px;
+  padding: 3px 15px;
+  border: 1px dashed #aaa;
+}
+
+.pvtAxisContainer li span.pvtAttr {
+  -webkit-text-size-adjust: 100%;
+  background: #F3F3F3;
+  border: 1px solid #DEDEDE;
+  padding: 2px 5px;
+  white-space: nowrap;
+  border-radius: 5px;
+}
+
+.pvtTriangle { cursor: pointer; color: grey; }
+
+.pvtHorizList li { display: inline; }
+
+.pvtVertList { vertical-align: top; }
+
+.pvtFilteredAttribute { font-style: italic; }
+
+.pvtFilterBox {
+  z-index: 100;
+  width: 300px;
+  border: 1px solid gray;
+  background-color: #fff;
+  position: absolute;
+  text-align: center;
+}
+.pvtFilterBox h4  { margin: 15px; }
+.pvtFilterBox p   { margin: 10px auto; }
+.pvtFilterBox label { font-weight: 400; }
+.pvtFilterBox input[type=checkbox] { margin-right: 10px; margin-left: 10px; }
+.pvtFilterBox input[type=text]     { width: 230px; }
+.pvtFilterBox .count { color: gray; font-weight: 400; margin-left: 3px; }
+
+.pvtCheckContainer {
+  text-align: left;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow-y: scroll;
+  width: 100%;
+  max-height: 250px;
+  border-top: 1px solid #d3d3d3;
+  border-bottom: 1px solid #d3d3d3;
+}
+.pvtCheckContainer p { margin: 5px; }
+
+.pvtRendererArea { padding: 5px; }
+
+/* -----------------------------------------------------------------------------
+ * Vanilla / SortableJS adapter additions
+ * ----------------------------------------------------------------------------- */
 
 /*
- * SortableJS drag placeholder — pivot.css gives li.pvtPlaceholder a dashed
- * border, but unlike jQuery UI's empty placeholder the SortableJS ghost
- * still renders the span.pvtAttr text.  Hide it so only the outline shows,
- * matching the original jQuery UI look.
+ * SortableJS drag placeholder — SortableJS keeps rendering the span.pvtAttr
+ * text inside li.pvtPlaceholder.  Hide it so only the dashed outline shows.
  */
 .pvtAxisContainer li.pvtPlaceholder span {
   visibility: hidden;
 }
 
 /*
- * Full-width pivot UI layout.
- * The outer table (table.pvtUi) defaults to shrink-wrap width, which leaves
- * chart renderers cramped.  These rules make the table stretch to fill its
- * container and let td.pvtRendererArea absorb all remaining space so that
- * canvas-based renderers (Chart.js, etc.) have room to breathe.
+ * Full-width layout — table.pvtUi defaults to shrink-wrap width, which
+ * leaves chart renderers cramped.  These rules make it fill its container
+ * and let td.pvtRendererArea absorb all remaining space so that canvas-based
+ * renderers (Chart.js, etc.) have room to breathe.
  */
 table.pvtUi {
   width: 100%;
