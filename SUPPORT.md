@@ -2,7 +2,7 @@
 
 ## Bug reports and feature requests
 
-Please use [GitHub Issues](https://github.com/jmars25/pivottable/issues) to report bugs or request features.
+Please use [GitHub Issues](https://github.com/jmars25/pivottable-ts/issues) to report bugs or request features.
 
 When reporting a bug, include:
 - A minimal reproducible example (code snippet or live demo link)
@@ -11,4 +11,4 @@ When reporting a bug, include:
 
 ## Questions
 
-For general usage questions, please open a [GitHub Discussion](https://github.com/jmars25/pivottable/discussions) rather than an issue.
+For general usage questions, please open a [GitHub Discussion](https://github.com/jmars25/pivottable-ts/discussions) rather than an issue.
