@@ -1,6 +1,6 @@
 import { useEffect, useRef, useMemo } from "react";
-import { createPivotUI } from "pivottable-ts/vanilla";
-import type { PivotUIOptions } from "pivottable-ts/vanilla";
+import { createPivotUI } from "@jmars25/pivottable-ts/vanilla";
+import type { PivotUIOptions } from "@jmars25/pivottable-ts/vanilla";
 
 // ─── usePivotUI ──────────────────────────────────────────────────────────────
 // Core hook: mounts a pivot UI into a div, cleans up on unmount or locale change.

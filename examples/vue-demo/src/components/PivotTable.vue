@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
-import { type PivotUIOptions } from "pivottable-ts/vanilla";
+import { type PivotUIOptions } from "@jmars25/pivottable-ts/vanilla";
 import { usePivotUI } from "../composables/usePivotUI";
 
 // ─── Props ────────────────────────────────────────────────────────────────────

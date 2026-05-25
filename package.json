@@ -1,5 +1,5 @@
 {
-  "name": "pivottable-ts",
+  "name": "@jmars25/pivottable-ts",
   "version": "1.0.0",
   "description": "TypeScript pivot table with drag-and-drop, vanilla adapter, Chart.js renderers and 15-language locale support",
   "main": "dist/pivot.js",

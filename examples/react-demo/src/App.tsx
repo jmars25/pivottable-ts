@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
-import { pivotUtilities } from "pivottable-ts/vanilla";
-import { chartjsRenderers } from "pivottable-ts/renderers/chartjs";
+import { pivotUtilities } from "@jmars25/pivottable-ts/vanilla";
+import { chartjsRenderers } from "@jmars25/pivottable-ts/renderers/chartjs";
 import PivotTable from "./components/PivotTable";
 
 // ─── Renderers ────────────────────────────────────────────────────────────────

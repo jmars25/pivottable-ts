@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "chart.js":      "^4.5.1",
-    "pivottable-ts": "file:../..",
+    "@jmars25/pivottable-ts": "file:../..",
     "vue":           "^3.5.13"
   },
   "devDependencies": {

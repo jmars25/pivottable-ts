@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { pivotUtilities } from "pivottable-ts/vanilla";
-import { chartjsRenderers } from "pivottable-ts/renderers/chartjs";
+import { pivotUtilities } from "@jmars25/pivottable-ts/vanilla";
+import { chartjsRenderers } from "@jmars25/pivottable-ts/renderers/chartjs";
 import PivotTable from "./components/PivotTable.vue";
 
 // ─── Renderers ────────────────────────────────────────────────────────────────

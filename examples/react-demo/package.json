@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "chart.js":      "^4.5.1",
-    "pivottable-ts": "file:../..",
+    "@jmars25/pivottable-ts": "file:../..",
     "react":         "^18.3.1",
     "react-dom":     "^18.3.1"
   },

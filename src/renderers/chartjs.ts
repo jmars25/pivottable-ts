@@ -8,7 +8,7 @@
  *   npm install chart.js
  *
  * Usage:
- *   import { chartjsRenderers } from "pivottable-ts/renderers/chartjs";
+ *   import { chartjsRenderers } from "@jmars25/pivottable-ts/renderers/chartjs";
  *   createPivotUI(el, data, { renderers: chartjsRenderers });
  *
  * Renderers exported:
@@ -280,7 +280,7 @@ function multiplePieRenderer(
  * createPivotUI(el, data, { renderers: chartjsRenderers });
  *
  * @example  // merge with table renderers
- * import { pivotUtilities } from "pivottable-ts/vanilla";
+ * import { pivotUtilities } from "@jmars25/pivottable-ts/vanilla";
  * createPivotUI(el, data, {
  *   renderers: { ...pivotUtilities.renderers, ...chartjsRenderers },
  * });

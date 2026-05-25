@@ -1,5 +1,5 @@
 import { type Ref, watch, onUnmounted } from "vue";
-import { createPivotUI, type PivotUIOptions } from "pivottable-ts/vanilla";
+import { createPivotUI, type PivotUIOptions } from "@jmars25/pivottable-ts/vanilla";
 
 /**
  * Vue composable that mounts a PivotUI inside `containerRef`.

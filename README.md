@@ -9,7 +9,7 @@ Forked from the original [pivottable](https://github.com/nicolaskruchten/pivotta
 ## Installation
 
 ```bash
-npm install pivottable-ts
+npm install @jmars25/pivottable-ts
 ```
 
 For Chart.js renderers:
@@ -24,8 +24,8 @@ npm install chart.js
 ### Static table
 
 ```ts
-import { createPivot } from "pivottable-ts/vanilla";
-import "pivottable-ts/dist/pivot.css";
+import { createPivot } from "@jmars25/pivottable-ts/vanilla";
+import "@jmars25/pivottable-ts/dist/pivot.css";
 
 const data = [
   { Region: "North", Product: "Widget", Sales: 120 },
@@ -43,8 +43,8 @@ createPivot(document.getElementById("output"), data, {
 ### Interactive drag-and-drop UI
 
 ```ts
-import { createPivotUI } from "pivottable-ts/vanilla";
-import "pivottable-ts/dist/pivot.css";
+import { createPivotUI } from "@jmars25/pivottable-ts/vanilla";
+import "@jmars25/pivottable-ts/dist/pivot.css";
 
 const handle = createPivotUI(document.getElementById("output"), data, {
   rows: ["Region"],
@@ -61,8 +61,8 @@ handle.destroy();
 ## Chart.js renderers
 
 ```ts
-import { createPivotUI, pivotUtilities } from "pivottable-ts/vanilla";
-import { chartjsRenderers } from "pivottable-ts/renderers/chartjs";
+import { createPivotUI, pivotUtilities } from "@jmars25/pivottable-ts/vanilla";
+import { chartjsRenderers } from "@jmars25/pivottable-ts/renderers/chartjs";
 
 createPivotUI(el, data, {
   renderers: { ...pivotUtilities.renderers, ...chartjsRenderers },
@@ -79,7 +79,7 @@ Available renderers: `Bar Chart`, `Stacked Bar Chart`, `Horizontal Bar Chart`, `
 Import the side-effect module once at your app entry point to register all 15 locales, then pass `locale` to any create function:
 
 ```ts
-import "pivottable-ts/locales"; // registers: cs, da, de, es, fr, it, ja, nl, pl, pt, ru, sq, tr, zh
+import "@jmars25/pivottable-ts/locales"; // registers: cs, da, de, es, fr, it, ja, nl, pl, pt, ru, sq, tr, zh
 
 createPivotUI(el, data, { locale: "de" });
 ```
@@ -92,10 +92,10 @@ Supported locales: `cs` `da` `de` `es` `fr` `it` `ja` `nl` `pl` `pt` `ru` `sq` `
 
 ```tsx
 import { useEffect, useRef, useMemo } from "react";
-import { createPivotUI } from "pivottable-ts/vanilla";
-import type { PivotUIOptions } from "pivottable-ts/vanilla";
-import "pivottable-ts/dist/pivot.css";
-import "pivottable-ts/locales";
+import { createPivotUI } from "@jmars25/pivottable-ts/vanilla";
+import type { PivotUIOptions } from "@jmars25/pivottable-ts/vanilla";
+import "@jmars25/pivottable-ts/dist/pivot.css";
+import "@jmars25/pivottable-ts/locales";
 
 function PivotTable({ data, locale = "en", ...opts }: { data: unknown[]; locale?: string } & PivotUIOptions) {
   const ref  = useRef<HTMLDivElement>(null);
@@ -120,9 +120,9 @@ See [`examples/react-demo/`](examples/react-demo/) for a full working example wi
 ```vue
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from "vue";
-import { createPivotUI } from "pivottable-ts/vanilla";
-import "pivottable-ts/dist/pivot.css";
-import "pivottable-ts/locales";
+import { createPivotUI } from "@jmars25/pivottable-ts/vanilla";
+import "@jmars25/pivottable-ts/dist/pivot.css";
+import "@jmars25/pivottable-ts/locales";
 
 const props  = defineProps<{ data: unknown[]; locale?: string }>();
 const el     = ref<HTMLElement | null>(null);
@@ -153,8 +153,8 @@ See [`examples/vue-demo/`](examples/vue-demo/) for a full working example.
 For large datasets, pass data as typed arrays instead of an array of row objects. Strings are dictionary-encoded (`Uint16Array`), numbers use `Float64Array`. This avoids per-row object allocation and speeds up pivot computation significantly.
 
 ```ts
-import { PivotData } from "pivottable-ts";
-import type { ColumnarInput } from "pivottable-ts";
+import { PivotData } from "@jmars25/pivottable-ts";
+import type { ColumnarInput } from "@jmars25/pivottable-ts";
 
 const input: ColumnarInput = {
   columnFormat: true,
@@ -180,7 +180,7 @@ createPivot(el, input, { rows: ["Region"], cols: ["Product"], vals: ["Sales"] })
 `PivotStream` accepts records one at a time, accumulates them into columnar format internally, then hands off to `PivotData` when done. Useful for WebSockets, CSV parsing, or any source where data arrives incrementally.
 
 ```ts
-import { PivotStream } from "pivottable-ts";
+import { PivotStream } from "@jmars25/pivottable-ts";
 
 const stream = new PivotStream({
   onComplete: (_err, count, s) => {
@@ -209,8 +209,8 @@ await stream.fromFetch("/api/data.csv");
 No build step needed. SortableJS is bundled in — only two tags required:
 
 ```html
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pivottable-ts/dist/pivot.css">
-<script src="https://cdn.jsdelivr.net/npm/pivottable-ts/dist/pivot.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@jmars25/pivottable-ts/dist/pivot.css">
+<script src="https://cdn.jsdelivr.net/npm/@jmars25/pivottable-ts/dist/pivot.min.js"></script>
 <script>
   const { createPivotUI } = PivotTableTS;
   createPivotUI(document.getElementById("output"), data, {
@@ -271,4 +271,4 @@ Namespace re-exported from the vanilla adapter. Contains:
 ## License
 
 MIT — see [LICENSE.md](LICENSE.md).
-© 2025 jmars25. Original pivottable © 2012 Nicolas Kruchten.
+© 2026 jmars25. Original pivottable © 2012 Nicolas Kruchten.

@@ -5,11 +5,11 @@
  * that createPivotUI picks them up via the `locale` option.
  *
  * Usage:
- *   import "pivottable-ts/locales";                 // register all locales
+ *   import "@jmars25/pivottable-ts/locales";                 // register all locales
  *   createPivotUI(el, data, { locale: "de" });      // use German
  *
  * Or import the map directly:
- *   import { locales } from "pivottable-ts/locales";
+ *   import { locales } from "@jmars25/pivottable-ts/locales";
  *   createPivotUI(el, data, { locale: "fr", renderers: locales.fr.renderers });
  *
  * Included locales: cs da de es fr it ja nl pl pt ru sq tr zh
