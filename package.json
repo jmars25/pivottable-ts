@@ -1,6 +1,6 @@
 {
   "name": "@jmars25/pivottable-ts",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TypeScript pivot table with drag-and-drop, vanilla adapter, Chart.js renderers and 15-language locale support",
   "main": "dist/pivot.js",
   "module": "dist/pivot.mjs",
@@ -12,21 +12,21 @@
       "require": "./dist/pivot.js"
     },
     "./vanilla": {
-      "types":   "./dist/adapters/vanilla.d.ts",
-      "import":  "./dist/adapters/vanilla.mjs",
+      "types": "./dist/adapters/vanilla.d.ts",
+      "import": "./dist/adapters/vanilla.mjs",
       "require": "./dist/adapters/vanilla.js"
     },
     "./renderers/chartjs": {
-      "types":   "./dist/renderers/chartjs.d.ts",
-      "import":  "./dist/renderers/chartjs.mjs",
+      "types": "./dist/renderers/chartjs.d.ts",
+      "import": "./dist/renderers/chartjs.mjs",
       "require": "./dist/renderers/chartjs.js"
     },
     "./locales": {
-      "types":   "./dist/locales/index.d.ts",
-      "import":  "./dist/locales/index.mjs",
+      "types": "./dist/locales/index.d.ts",
+      "import": "./dist/locales/index.mjs",
       "require": "./dist/locales/index.js"
     },
-    "./dist/pivot.css":   "./dist/pivot.css",
+    "./dist/pivot.css": "./dist/pivot.css",
     "./dist/pivot.min.js": "./dist/pivot.min.js"
   },
   "files": [
