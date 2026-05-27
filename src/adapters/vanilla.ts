@@ -329,8 +329,8 @@ export function createPivotUI(
     let   recordsProcessed = 0;
 
     PivotData.forEachRecord(input, opts.derivedAttributes ?? {}, (record) => {
-      if (!opts.filter!(record)) return;
-      materializedInput.push(record);
+      if (opts.filter && !opts.filter(record)) return;
+      materializedInput.push(Object.assign({}, record));
       for (const attr of Object.keys(record)) {
         if (attrValues[attr] == null) {
           attrValues[attr] = {};
