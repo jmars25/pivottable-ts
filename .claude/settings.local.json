@@ -30,7 +30,28 @@
       "Bash(node -e \"const p = require\\('./dist/pivot.js'\\); console.log\\('CJS loads OK'\\);\")",
       "Bash(npx --yes http-server --version)",
       "Bash(npm run *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(curl -s \"https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css\")",
+      "Bash(node -e \"const cj = require\\('chart.js'\\); console.log\\(Object.keys\\(cj\\).filter\\(k => /Controller|Element|Scale|Plugin|Chart/.test\\(k\\)\\).slice\\(0,30\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(del src\\\\c3_renderers.coffee src\\\\d3_renderers.coffee src\\\\export_renderers.coffee src\\\\gchart_renderers.coffee src\\\\plotly_renderers.coffee)",
+      "Bash(grep -E \"\\\\.\\(coffee|js\\)$\")",
+      "Bash(node -e \"const p = require\\('./dist/pivot.js'\\); console.log\\(Object.keys\\(p.aggregatorTemplates\\).join\\(', '\\)\\)\")",
+      "Bash(node -e \"require\\('http'\\)\")",
+      "Bash(node -e \"require\\('fs'\\); const s=require\\('http'\\).createServer\\(\\(req,res\\)=>{res.end\\('ok'\\)}\\); s.listen\\(0,\\(\\)=>{console.log\\(s.address\\(\\).port\\); s.close\\(\\)}\\)\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npx vite *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":5179 \")",
+      "Bash(findstr LISTENING)",
+      "Bash(taskkill /PID 19428 /F)",
+      "PowerShell(Stop-Process -Id 19428 -Force)",
+      "Bash(rm bower.json composer.json CNAME)",
+      "Bash(rmdir locales *)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 5179 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue })",
+      "Bash(curl -s \"http://localhost:5179/src/main.ts\")",
+      "Bash(curl -s \"http://localhost:5179/@fs/C:/Users/jmars/Documents/PivotTable/pivottable/dist/pivot.css\")",
+      "WebFetch(domain:cdnjs.cloudflare.com)"
     ]
   }
 }

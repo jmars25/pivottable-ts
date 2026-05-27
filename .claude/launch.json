@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "static",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "5177", "."],
+      "port": 5177
+    },
+    {
+      "name": "react-demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "examples/react-demo", "run", "dev"],
+      "port": 5178
+    },
+    {
+      "name": "vue-demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "examples/vue-demo", "run", "dev"],
+      "port": 5179
+    }
+  ]
+}
